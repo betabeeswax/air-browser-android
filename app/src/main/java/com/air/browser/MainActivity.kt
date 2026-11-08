@@ -10,6 +10,8 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.Environment
 import android.view.Gravity
 import android.view.View
@@ -30,6 +32,8 @@ import android.widget.Toast
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URLEncoder
+import java.net.HttpURLConnection
+import java.net.URL
 
 class MainActivity : Activity() {
     private data class BrowserTab(
@@ -66,6 +70,7 @@ class MainActivity : Activity() {
         CookieManager.getInstance().setAcceptCookie(true)
         buildInterface()
         restoreTabs()
+        if (prefs.getBoolean("automatic_updates", true)) Handler(Looper.getMainLooper()).postDelayed({ checkForUpdates(false) }, 4500)
     }
 
     private fun buildInterface() {
@@ -390,6 +395,10 @@ class MainActivity : Activity() {
         popup.menu.add(0, 6, 5, "Share page")
         popup.menu.add(0, 7, 6, "Clear browsing history")
         popup.menu.add(0, 8, 7, "About AIR Browser")
+        popup.menu.add(0, 9, 8, "Check for updates")
+        popup.menu.add(0, 10, 9, "Automatic updates: " + if (prefs.getBoolean("automatic_updates", true)) "On" else "Off")
+        popup.menu.add(0, 11, 10, "Open QuietChat")
+        popup.menu.add(0, 12, 11, "Reading mode")
         popup.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 1 -> addTab()
@@ -402,10 +411,57 @@ class MainActivity : Activity() {
                 8 -> AlertDialog.Builder(this).setTitle("AIR Browser")
                     .setMessage("AIR Browser for Android\nEarly testing version")
                     .setPositiveButton("OK", null).show()
+                9 -> checkForUpdates(true)
+                10 -> { val enabled = !prefs.getBoolean("automatic_updates", true); prefs.edit().putBoolean("automatic_updates", enabled).apply(); Toast.makeText(this, "Automatic updates " + if (enabled) "enabled" else "disabled", Toast.LENGTH_SHORT).show() }
+                11 -> addTab("https://quietchat-rho.vercel.app")
+                12 -> toggleReadingMode()
             }
             true
         }
         popup.show()
+    }
+
+    private fun toggleReadingMode() {
+        val web = activeTab()?.webView ?: return
+        val script = "(() => { const id='air-reading-mode'; const old=document.getElementById(id); if(old){old.remove();return 'off'} const s=document.createElement('style');s.id=id;s.textContent='body{max-width:820px!important;margin:32px auto!important;padding:24px!important;background:#f7f2e8!important;color:#242424!important;font:19px/1.8 Georgia,serif!important}body *{font-family:Georgia,serif!important;line-height:1.8!important}header,nav,footer,aside,[role=navigation]{display:none!important}img{max-width:100%!important;height:auto!important}';document.head.appendChild(s);return 'on' })()"
+        web.evaluateJavascript(script, null)
+        Toast.makeText(this, "Reading mode toggled", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun checkForUpdates(manual: Boolean) {
+        if (!manual && !prefs.getBoolean("automatic_updates", true)) return
+        Thread {
+            var latestBuild = 0
+            var downloadUrl = ""
+            try {
+                val connection = (URL("https://api.github.com/repos/betabeeswax/air-browser-android/releases?per_page=10").openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 10000; readTimeout = 10000; setRequestProperty("User-Agent", "AIR-Browser-Android")
+                }
+                val releases = JSONArray(connection.inputStream.bufferedReader().use { it.readText() })
+                connection.disconnect()
+                for (i in 0 until releases.length()) {
+                    val release = releases.optJSONObject(i) ?: continue
+                    if (release.optBoolean("draft") || release.optBoolean("prerelease")) continue
+                    val tag = release.optString("tag_name")
+                    val build = Regex("(\\\\d+)$").find(tag)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
+                    val assets = release.optJSONArray("assets") ?: JSONArray()
+                    var apk = ""
+                    for (j in 0 until assets.length()) { val asset = assets.optJSONObject(j) ?: continue; if (asset.optString("name") == "AIR-Browser-Android.apk") apk = asset.optString("browser_download_url") }
+                    if (build > latestBuild && apk.isNotBlank()) { latestBuild = build; downloadUrl = apk }
+                }
+            } catch (_: Exception) { }
+            runOnUiThread {
+                val currentBuild = BuildConfig.VERSION_CODE
+                if (latestBuild > currentBuild && downloadUrl.isNotBlank()) {
+                    AlertDialog.Builder(this).setTitle("AIR Browser update available")
+                        .setMessage("AIR Browser Android build $latestBuild is available. Would you like to update now or later?")
+                        .setPositiveButton("Update now") { _, _ -> startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(downloadUrl))) }
+                        .setNegativeButton("Later", null).show()
+                } else if (manual) {
+                    Toast.makeText(this, if (latestBuild == 0) "Couldn't check for updates." else "AIR Browser is up to date.", Toast.LENGTH_LONG).show()
+                }
+            }
+        }.start()
     }
 
     private fun addBookmark() {
