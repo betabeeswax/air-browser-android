@@ -49,7 +49,9 @@ class MainActivity : Activity() {
         private const val MAX_RESTORED_TABS = 8
     }
 
-    private val prefs by lazy { getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
+    private var activeProfile = "Personal"
+    private val prefs: android.content.SharedPreferences get() = getSharedPreferences(PREFS + "_" + activeProfile, Context.MODE_PRIVATE)
+    private val basePrefs by lazy { getSharedPreferences(PREFS + "_profiles", Context.MODE_PRIVATE) }
     private val tabs = mutableListOf<BrowserTab>()
     private var nextTabId = 1
     private var activeTabId = -1
@@ -61,9 +63,11 @@ class MainActivity : Activity() {
     private lateinit var backButton: TextView
     private lateinit var forwardButton: TextView
     private lateinit var reloadButton: TextView
+    private lateinit var profileButton: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        activeProfile = basePrefs.getString("last_profile", "Personal") ?: "Personal"
         window.statusBarColor = Color.rgb(11, 16, 32)
         window.navigationBarColor = Color.rgb(11, 16, 32)
         window.decorView.systemUiVisibility = 0
@@ -98,6 +102,8 @@ class MainActivity : Activity() {
         }
         header.addView(brand)
         header.addView(browserLabel)
+        profileButton = actionText("● $activeProfile") { showProfilesDialog() }.apply { textSize = 12f; setTextColor(Color.rgb(151, 204, 255)); setPadding(dp(7), 0, dp(7), 0) }
+        header.addView(profileButton, LinearLayout.LayoutParams(-2, dp(42)))
         header.addView(View(this), LinearLayout.LayoutParams(0, dp(1), 1f))
         tabCount = actionText("▢ 1") { showTabsDialog() }
         header.addView(tabCount, buttonParams())
@@ -316,7 +322,7 @@ class MainActivity : Activity() {
         val encoded = try { URLEncoder.encode(raw, "UTF-8") } catch (_: Exception) { raw }
         val target = when {
             raw.startsWith("https://", true) || raw.startsWith("http://", true) -> raw
-            raw.contains(" ") || !raw.contains(".") -> "https://www.google.com/search?q=$encoded"
+            raw.contains(" ") || !raw.contains(".") -> searchUrl(raw)
             else -> "https://$raw"
         }
         val tab = activeTab() ?: addTab()
@@ -345,19 +351,22 @@ class MainActivity : Activity() {
         <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
         <style>
         *{box-sizing:border-box}body{margin:0;background:#0b1020;color:#f5f8ff;font-family:Arial,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
-        main{width:100%;max-width:520px;text-align:center;margin-top:-7vh}.logo{font-size:54px;font-weight:800;letter-spacing:3px;color:#55adff}.sub{color:#9eacc5;margin:6px 0 30px}
+        main{width:100%;max-width:620px;text-align:center;margin-top:-4vh}.logo{font-size:54px;font-weight:800;letter-spacing:3px;color:#55adff}.sub{color:#9eacc5;margin:6px 0 18px}
+        .clock{font-size:28px;font-weight:700;margin:0 0 4px}.date{color:#9eacc5;margin:0 0 24px}
         form{display:flex;gap:8px;background:#1c273d;border:1px solid #314361;border-radius:18px;padding:7px}
         input{min-width:0;flex:1;background:transparent;border:0;outline:0;color:white;font-size:16px;padding:10px}
         button{border:0;border-radius:13px;background:#2789e8;color:white;font-weight:700;padding:0 17px;font-size:15px}
-        .links{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:28px}
+        .links,.widgets{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:20px}
         a{color:#dce9ff;text-decoration:none;background:#151f33;border:1px solid #263650;border-radius:15px;padding:16px 6px;font-size:14px}
-        small{display:block;color:#8292ad;margin-top:32px}
-        </style></head><body><main><div class="logo">AIR</div><div class="sub">A clearer way to browse.</div>
-        <form onsubmit="event.preventDefault();var q=document.getElementById('q').value.trim();if(q)location.href='https://www.google.com/search?q='+encodeURIComponent(q)">
-        <input id="q" placeholder="Search the web or enter a website" autocomplete="off"><button type="submit">Search</button></form>
+        .widgets a{display:flex;flex-direction:column;gap:6px}.widgets b{font-size:14px}.widgets small{color:#9eacc5;font-size:11px}
+        .foot{display:block;color:#8292ad;margin-top:24px}
+        </style></head><body><main><div class="logo">AIR</div><div class="sub">A clearer way to browse.</div><div class="clock" id="clock">--:--</div><div class="date" id="date">Loading date…</div>
+        <form onsubmit="event.preventDefault();var q=document.getElementById('q').value.trim();if(q){var e='__SEARCH_ENGINE__';var u=e==='Bing'?'https://www.bing.com/search?q=':e==='DuckDuckGo'?'https://duckduckgo.com/?q=':'https://www.google.com/search?q=';location.href=u+encodeURIComponent(q)}">
+        <input id="q" placeholder="Search the web" autocomplete="off"><button type="submit">Search</button></form>
         <div class="links"><a href="https://www.google.com">Google</a><a href="https://www.youtube.com">YouTube</a><a href="https://www.wikipedia.org">Wikipedia</a></div>
-        <small>Your tabs and bookmarks stay on this device.</small></main></body></html>
-    """.trimIndent()
+        <div class="widgets"><a href="https://www.google.com/search?q=weather"><b>☀ Weather</b><small>Local forecast</small></a><a href="https://quietchat-rho.vercel.app"><b>◉ QuietChat</b><small>Open your chats</small></a><a href="https://www.wikipedia.org"><b>✦ Discover</b><small>Learn something new</small></a></div>
+        <small class="foot">Your tabs and bookmarks stay on this device.</small></main><script>function tick(){const d=new Date();document.getElementById('clock').textContent=d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});document.getElementById('date').textContent=d.toLocaleDateString([],{weekday:'long',month:'long',day:'numeric'})}tick();setInterval(tick,1000)</script></body></html>
+    """.trimIndent().replace("__SEARCH_ENGINE__", prefs.getString("search_engine", "Google") ?: "Google")
 
     private fun goBack() {
         val web = activeTab()?.webView ?: return
@@ -399,6 +408,7 @@ class MainActivity : Activity() {
         popup.menu.add(0, 10, 9, "Automatic updates: " + if (prefs.getBoolean("automatic_updates", true)) "On" else "Off")
         popup.menu.add(0, 11, 10, "Open QuietChat")
         popup.menu.add(0, 12, 11, "Reading mode")
+        popup.menu.add(0, 13, 12, "Profiles & search settings")
         popup.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 1 -> addTab()
@@ -415,6 +425,7 @@ class MainActivity : Activity() {
                 10 -> { val enabled = !prefs.getBoolean("automatic_updates", true); prefs.edit().putBoolean("automatic_updates", enabled).apply(); Toast.makeText(this, "Automatic updates " + if (enabled) "enabled" else "disabled", Toast.LENGTH_SHORT).show() }
                 11 -> addTab("https://quietchat-rho.vercel.app")
                 12 -> toggleReadingMode()
+                13 -> showProfilesDialog()
             }
             true
         }
@@ -462,6 +473,60 @@ class MainActivity : Activity() {
                 }
             }
         }.start()
+    }
+
+    private fun searchUrl(query: String): String {
+        val encoded = try { URLEncoder.encode(query, "UTF-8") } catch (_: Exception) { query }
+        return when (prefs.getString("search_engine", "Google")) {
+            "Bing" -> "https://www.bing.com/search?q=$encoded"
+            "DuckDuckGo" -> "https://duckduckgo.com/?q=$encoded"
+            else -> "https://www.google.com/search?q=$encoded"
+        }
+    }
+
+    private fun showProfilesDialog() {
+        val saved = try { JSONArray(basePrefs.getString("profiles", "[\"Personal\"]")) } catch (_: Exception) { JSONArray().put("Personal") }
+        val names = mutableListOf<String>()
+        for (i in 0 until saved.length()) saved.optString(i).takeIf { it.isNotBlank() }?.let { names.add(it) }
+        if ("Personal" !in names) names.add(0, "Personal")
+        val items = names.map { if (it == activeProfile) "$it  ✓" else it }.toMutableList()
+        items.add("＋ Add profile")
+        items.add("⚙ Search engine")
+        AlertDialog.Builder(this).setTitle("Profile · $activeProfile")
+            .setItems(items.toTypedArray()) { _, which ->
+                when {
+                    which < names.size -> {
+                        activeProfile = names[which]
+                        basePrefs.edit().putString("last_profile", activeProfile).apply()
+                        recreate()
+                    }
+                    which == names.size -> {
+                        val input = EditText(this).apply { hint = "Profile name"; setSingleLine(true) }
+                        AlertDialog.Builder(this).setTitle("Create profile").setView(input)
+                            .setNegativeButton("Cancel", null)
+                            .setPositiveButton("Create") { _, _ ->
+                                val name = input.text.toString().trim().take(28)
+                                if (name.isNotBlank() && names.none { it.equals(name, true) }) {
+                                    val updated = JSONArray()
+                                    (names + name).forEach { updated.put(it) }
+                                    basePrefs.edit().putString("profiles", updated.toString()).putString("last_profile", name).apply()
+                                    activeProfile = name
+                                    recreate()
+                                } else Toast.makeText(this, "Choose a new profile name.", Toast.LENGTH_SHORT).show()
+                            }.show()
+                    }
+                    else -> {
+                        val engines = arrayOf("Google", "Bing", "DuckDuckGo")
+                        val selected = engines.indexOf(prefs.getString("search_engine", "Google")).coerceAtLeast(0)
+                        AlertDialog.Builder(this).setTitle("Default search engine")
+                            .setSingleChoiceItems(engines, selected) { dialog, choice ->
+                                prefs.edit().putString("search_engine", engines[choice]).apply()
+                                dialog.dismiss()
+                                Toast.makeText(this, "Search engine set to ${engines[choice]}", Toast.LENGTH_SHORT).show()
+                            }.setNegativeButton("Cancel", null).show()
+                    }
+                }
+            }.setNegativeButton("Close", null).show()
     }
 
     private fun addBookmark() {
