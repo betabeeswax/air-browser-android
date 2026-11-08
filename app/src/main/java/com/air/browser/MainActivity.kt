@@ -26,6 +26,7 @@ import android.webkit.WebViewClient
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.ImageView
 import android.widget.PopupMenu
 import android.widget.TextView
 import android.widget.Toast
@@ -120,6 +121,7 @@ class MainActivity : Activity() {
             textSize = 18f
             setTextColor(Color.WHITE)
         }
+        header.addView(ImageView(this).apply { setImageResource(R.drawable.ic_launcher); scaleType = ImageView.ScaleType.FIT_CENTER }, LinearLayout.LayoutParams(dp(32), dp(32)))
         header.addView(brand)
         header.addView(browserLabel)
         profileButton = actionText("● $activeProfile") { showProfilesDialog() }.apply { textSize = 12f; setTextColor(Color.rgb(151, 204, 255)); setPadding(dp(7), 0, dp(7), 0) }
