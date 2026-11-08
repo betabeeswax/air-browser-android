@@ -11,7 +11,7 @@ android {
         applicationId = "com.air.browser"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
+        versionCode = (System.getenv("AIR_BUILD_NUMBER")?.toIntOrNull() ?: 1)
         versionName = "0.1.0"
     }
 
