@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       AIR_BUILD_NUMBER: ${{ github.run_number }}
-      AIR_SIGNING_KEYSTORE: air-release.jks
+      AIR_SIGNING_KEYSTORE: app/air-release.jks
       AIR_SIGNING_STORE_PASSWORD: ${{ secrets.AIR_SIGNING_STORE_PASSWORD }}
       AIR_SIGNING_KEY_ALIAS: ${{ secrets.AIR_SIGNING_KEY_ALIAS }}
       AIR_SIGNING_KEY_PASSWORD: ${{ secrets.AIR_SIGNING_KEY_PASSWORD }}
