@@ -4,6 +4,8 @@ Native Android browser built with Kotlin and Android WebView.
 
 ## First version
 
+This is an early testing build; features may change.
+
 - Multiple browser tabs
 - Address and search bar
 - Back, forward, reload and home
