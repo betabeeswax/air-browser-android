@@ -68,6 +68,7 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         activeProfile = basePrefs.getString("last_profile", "Personal") ?: "Personal"
+        migrateLegacyPreferences()
         window.statusBarColor = Color.rgb(11, 16, 32)
         window.navigationBarColor = Color.rgb(11, 16, 32)
         window.decorView.systemUiVisibility = 0
@@ -75,6 +76,25 @@ class MainActivity : Activity() {
         buildInterface()
         restoreTabs()
         if (prefs.getBoolean("automatic_updates", true)) Handler(Looper.getMainLooper()).postDelayed({ checkForUpdates(false) }, 4500)
+    }
+
+    private fun migrateLegacyPreferences() {
+        val legacy = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val personal = getSharedPreferences(PREFS + "_Personal", Context.MODE_PRIVATE)
+        if (!personal.contains("open_tabs") && legacy.all.isNotEmpty()) {
+            val editor = personal.edit()
+            legacy.all.forEach { (key, value) ->
+                when (value) {
+                    is String -> editor.putString(key, value)
+                    is Boolean -> editor.putBoolean(key, value)
+                    is Int -> editor.putInt(key, value)
+                    is Long -> editor.putLong(key, value)
+                    is Float -> editor.putFloat(key, value)
+                    else -> Unit
+                }
+            }
+            editor.apply()
+        }
     }
 
     private fun buildInterface() {
