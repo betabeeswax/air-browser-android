@@ -374,7 +374,7 @@ class MainActivity : Activity() {
 
     private fun showProfilesScreen() {
         showInAppPanel("Profiles") {
-            val saved = try { JSONArray(basePrefs.getString("profiles", "[\\"Personal\\"]")) } catch (_: Exception) { JSONArray().put("Personal") }
+            val saved = try { JSONArray(basePrefs.getString("profiles", "[\"Personal\"]")) } catch (_: Exception) { JSONArray().put("Personal") }
             val names = mutableListOf<String>()
             for (i in 0 until saved.length()) saved.optString(i).takeIf { it.isNotBlank() }?.let { names.add(it) }
             if ("Personal" !in names) names.add(0, "Personal")
