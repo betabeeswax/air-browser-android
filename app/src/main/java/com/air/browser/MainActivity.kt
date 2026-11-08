@@ -125,8 +125,18 @@ class MainActivity : Activity() {
         header.addView(ImageView(this).apply { setImageResource(R.drawable.ic_launcher); scaleType = ImageView.ScaleType.FIT_CENTER }, LinearLayout.LayoutParams(dp(32), dp(32)))
         header.addView(brand)
         header.addView(browserLabel)
-        profileButton = actionText("● $activeProfile") { showProfilesScreen() }.apply { textSize = 12f; setTextColor(Color.rgb(151, 204, 255)); setPadding(dp(8), 0, dp(8), 0); minWidth = dp(76); background = rounded(Color.rgb(28, 39, 61), dp(12)) }
-        header.addView(profileButton, LinearLayout.LayoutParams(-2, dp(42)))
+        profileButton = actionText("● ${activeProfile.take(6)}") { showProfilesScreen() }.apply {
+            textSize = 11f
+            setTextColor(Color.rgb(151, 204, 255))
+            setPadding(dp(5), 0, dp(5), 0)
+            minWidth = dp(64)
+            contentDescription = "Profiles: $activeProfile"
+            background = rounded(Color.rgb(28, 39, 61), dp(12))
+            isClickable = true
+            isFocusable = true
+        }
+        header.addView(profileButton, LinearLayout.LayoutParams(dp(70), dp(42)))
+        profileButton.setOnClickListener { showProfilesScreen() }
         header.addView(View(this), LinearLayout.LayoutParams(0, dp(1), 1f))
         tabCount = actionText("▢ 1") { showTabsDialog() }
         header.addView(tabCount, buttonParams())
