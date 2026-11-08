@@ -13,6 +13,10 @@ This is an early testing build; features may change.
 - Android Download Manager integration
 - Dark AIR-style mobile interface
 - Session tab restoration
+- Reading mode for cleaner article pages
+- QuietChat shortcut
+- Automatic update checks with an Update now / Later prompt
+- Manual update checks and an automatic-update on/off control
 
 ## Build
 
@@ -26,7 +30,7 @@ The debug APK is created at:
 
 `app/build/outputs/apk/debug/app-debug.apk`
 
-The GitHub Actions workflow builds an APK and publishes it in the GitHub Releases tab. Debug builds are for testing and are not signed for Play Store distribution.
+The GitHub Actions workflow builds an APK and publishes it in the GitHub Releases tab. Debug builds are for testing and are not signed for Play Store distribution. Android checks GitHub Releases for newer APKs when automatic updates are enabled; choosing Update now opens the APK download, and Android still asks the user to approve installation.
 
 ## Privacy
 
