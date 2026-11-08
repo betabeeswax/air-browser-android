@@ -65,6 +65,7 @@ class MainActivity : Activity() {
     private lateinit var forwardButton: TextView
     private lateinit var reloadButton: TextView
     private lateinit var profileButton: TextView
+    private lateinit var inAppPanel: LinearLayout
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -124,11 +125,12 @@ class MainActivity : Activity() {
         header.addView(ImageView(this).apply { setImageResource(R.drawable.ic_launcher); scaleType = ImageView.ScaleType.FIT_CENTER }, LinearLayout.LayoutParams(dp(32), dp(32)))
         header.addView(brand)
         header.addView(browserLabel)
-        profileButton = actionText("● $activeProfile") { showProfilesDialog() }.apply { textSize = 12f; setTextColor(Color.rgb(151, 204, 255)); setPadding(dp(7), 0, dp(7), 0) }
+        profileButton = actionText("● $activeProfile") { showProfilesScreen() }.apply { textSize = 12f; setTextColor(Color.rgb(151, 204, 255)); setPadding(dp(8), 0, dp(8), 0); minWidth = dp(76); background = rounded(Color.rgb(28, 39, 61), dp(12)) }
         header.addView(profileButton, LinearLayout.LayoutParams(-2, dp(42)))
         header.addView(View(this), LinearLayout.LayoutParams(0, dp(1), 1f))
         tabCount = actionText("▢ 1") { showTabsDialog() }
         header.addView(tabCount, buttonParams())
+        header.addView(actionText("⚙") { showSettingsScreen() }, buttonParams())
         header.addView(actionText("⋮") { showMainMenu(it) }, buttonParams())
         root.addView(header, LinearLayout.LayoutParams(-1, dp(46)))
 
@@ -170,9 +172,9 @@ class MainActivity : Activity() {
         addressRow.addView(actionText("Go") { navigateFromAddress() }, buttonParams())
         root.addView(addressRow, LinearLayout.LayoutParams(-1, dp(52)))
 
-        webContainer = FrameLayout(this).apply {
-            setBackgroundColor(Color.WHITE)
-        }
+        inAppPanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE; setPadding(dp(14), dp(12), dp(14), dp(12)); setBackgroundColor(Color.rgb(15, 23, 40)) }
+        root.addView(inAppPanel, LinearLayout.LayoutParams(-1, 0, 1f))
+        webContainer = FrameLayout(this).apply { setBackgroundColor(Color.WHITE) }
         root.addView(webContainer, LinearLayout.LayoutParams(-1, 0, 1f))
 
         val bottom = LinearLayout(this).apply {
@@ -195,6 +197,7 @@ class MainActivity : Activity() {
         } catch (_: Exception) {
             JSONArray()
         }
+        if (!prefs.getBoolean("restore_tabs", true)) { addTab(HOME_BASE); return }
         if (saved.length() == 0) {
             addTab(HOME_BASE)
             return
@@ -317,25 +320,99 @@ class MainActivity : Activity() {
     }
 
     private fun showTabsDialog() {
-        if (tabs.isEmpty()) return
-        val labels = tabs.mapIndexed { index, tab ->
-            "${index + 1}. ${tab.title.ifBlank { "New tab" }}"
-        }.toTypedArray()
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("Open tabs")
-            .setItems(labels) { _, which -> switchToTab(tabs[which].id) }
-            .setPositiveButton("New tab") { _, _ -> addTab() }
-            .setNegativeButton("Close", null)
-            .create()
-        dialog.setOnShowListener {
-            dialog.listView.setOnItemLongClickListener { _, _, position, _ ->
-                val tab = tabs.getOrNull(position)
-                if (tab != null && tabs.size > 1) closeTab(tab.id)
-                dialog.dismiss()
-                true
+        showInAppPanel("Open tabs") {
+            addView(panelButton("＋  New tab") { hideInAppPanel(); addTab() }, LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(10) })
+            tabs.toList().forEachIndexed { index, tab ->
+                val row = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(10), dp(4), dp(4), dp(4)); background = rounded(Color.rgb(28, 39, 61), dp(12)) }
+                row.addView(TextView(this@MainActivity).apply {
+                    text = (if (tab.id == activeTabId) "✓  " else "") + "${index + 1}. " + tab.title.ifBlank { "New tab" }
+                    textSize = 14f; setTextColor(Color.WHITE); gravity = Gravity.CENTER_VERTICAL; maxLines = 2
+                    setOnClickListener { hideInAppPanel(); switchToTab(tab.id) }
+                }, LinearLayout.LayoutParams(0, dp(48), 1f))
+                row.addView(panelButton("×") { closeTab(tab.id); showTabsDialog() }, LinearLayout.LayoutParams(dp(44), dp(44)))
+                addView(row, LinearLayout.LayoutParams(-1, dp(54)).apply { bottomMargin = dp(8) })
             }
         }
-        dialog.show()
+    }
+
+    private fun showInAppPanel(title: String, content: LinearLayout.() -> Unit) {
+        webContainer.visibility = View.GONE
+        inAppPanel.visibility = View.VISIBLE
+        inAppPanel.removeAllViews()
+        val heading = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        heading.addView(TextView(this@MainActivity).apply { text = title; textSize = 21f; typeface = Typeface.DEFAULT_BOLD; setTextColor(Color.WHITE) }, LinearLayout.LayoutParams(0, dp(48), 1f))
+        heading.addView(panelButton("Done") { hideInAppPanel() })
+        inAppPanel.addView(heading)
+        val scroll = android.widget.ScrollView(this)
+        val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(10), 0, dp(12)) }
+        scroll.addView(body)
+        inAppPanel.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        body.content()
+    }
+
+    private fun hideInAppPanel() { inAppPanel.visibility = View.GONE; webContainer.visibility = View.VISIBLE }
+
+    private fun panelButton(label: String, action: () -> Unit): TextView = TextView(this).apply {
+        text = label; textSize = 15f; gravity = Gravity.CENTER; setTextColor(Color.WHITE)
+        setPadding(dp(12), dp(8), dp(12), dp(8)); background = rounded(Color.rgb(39, 137, 232), dp(12))
+        isClickable = true; isFocusable = true; setOnClickListener { action() }
+    }
+
+    private fun panelLabel(label: String) = TextView(this).apply {
+        text = label; textSize = 13f; setTextColor(Color.rgb(158, 172, 197)); setPadding(dp(4), dp(14), dp(4), dp(6))
+    }
+
+    private fun showProfilesScreen() {
+        showInAppPanel("Profiles") {
+            val saved = try { JSONArray(basePrefs.getString("profiles", "[\\"Personal\\"]")) } catch (_: Exception) { JSONArray().put("Personal") }
+            val names = mutableListOf<String>()
+            for (i in 0 until saved.length()) saved.optString(i).takeIf { it.isNotBlank() }?.let { names.add(it) }
+            if ("Personal" !in names) names.add(0, "Personal")
+            names.forEach { name ->
+                addView(panelButton((if (name == activeProfile) "✓  " else "") + name) {
+                    if (name != activeProfile) { saveTabs(); activeProfile = name; basePrefs.edit().putString("last_profile", name).apply(); recreate() }
+                }, LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(8) })
+            }
+            addView(panelButton("＋ Add profile") {
+                val input = EditText(this@MainActivity).apply { hint = "Profile name"; setSingleLine(true) }
+                AlertDialog.Builder(this@MainActivity).setTitle("Create profile").setView(input)
+                    .setNegativeButton("Cancel", null).setPositiveButton("Create") { _, _ ->
+                        val name = input.text.toString().trim().take(28)
+                        if (name.isNotBlank() && names.none { it.equals(name, true) }) {
+                            val updated = JSONArray(); (names + name).forEach { updated.put(it) }
+                            saveTabs(); basePrefs.edit().putString("profiles", updated.toString()).putString("last_profile", name).apply()
+                            activeProfile = name; recreate()
+                        } else Toast.makeText(this@MainActivity, "Choose a new profile name.", Toast.LENGTH_SHORT).show()
+                    }.show()
+            }, LinearLayout.LayoutParams(-1, dp(48)))
+        }
+    }
+
+    private fun showSettingsScreen() {
+        showInAppPanel("Settings") {
+            addView(panelLabel("GENERAL"))
+            addView(panelButton("Default search engine: " + (prefs.getString("search_engine", "Google") ?: "Google")) {
+                val engines = arrayOf("Google", "Bing", "DuckDuckGo")
+                AlertDialog.Builder(this@MainActivity).setTitle("Default search engine")
+                    .setSingleChoiceItems(engines, engines.indexOf(prefs.getString("search_engine", "Google")).coerceAtLeast(0)) { dialog, which ->
+                        prefs.edit().putString("search_engine", engines[which]).apply(); dialog.dismiss(); showSettingsScreen()
+                    }.setNegativeButton("Cancel", null).show()
+            }, LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(8) })
+            addView(panelButton("Manage profiles") { showProfilesScreen() }, LinearLayout.LayoutParams(-1, dp(48)))
+            addView(panelLabel("STARTUP"))
+            addView(panelButton("Restore open tabs: " + if (prefs.getBoolean("restore_tabs", true)) "On" else "Off") {
+                prefs.edit().putBoolean("restore_tabs", !prefs.getBoolean("restore_tabs", true)).apply(); showSettingsScreen()
+            }, LinearLayout.LayoutParams(-1, dp(48)))
+            addView(panelLabel("UPDATES"))
+            addView(panelButton("Automatic updates: " + if (prefs.getBoolean("automatic_updates", true)) "On" else "Off") {
+                prefs.edit().putBoolean("automatic_updates", !prefs.getBoolean("automatic_updates", true)).apply(); showSettingsScreen()
+            }, LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(8) })
+            addView(panelButton("Check for updates") { checkForUpdates(true) }, LinearLayout.LayoutParams(-1, dp(48)))
+            addView(panelLabel("PRIVACY"))
+            addView(panelButton("Clear browsing history") { clearHistory() }, LinearLayout.LayoutParams(-1, dp(48)))
+            addView(panelLabel("ABOUT"))
+            addView(TextView(this@MainActivity).apply { text = "AIR Browser for Android\\nSettings and browser data are stored on this device."; textSize = 13f; setTextColor(Color.rgb(158, 172, 197)); setPadding(dp(4), dp(8), dp(4), dp(8)) })
+        }
     }
 
     private fun navigateFromAddress() {
@@ -430,7 +507,8 @@ class MainActivity : Activity() {
         popup.menu.add(0, 10, 9, "Automatic updates: " + if (prefs.getBoolean("automatic_updates", true)) "On" else "Off")
         popup.menu.add(0, 11, 10, "Open QuietChat")
         popup.menu.add(0, 12, 11, "Reading mode")
-        popup.menu.add(0, 13, 12, "Profiles & search settings")
+        popup.menu.add(0, 13, 12, "Profiles")
+        popup.menu.add(0, 14, 13, "Settings")
         popup.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 1 -> addTab()
@@ -447,7 +525,8 @@ class MainActivity : Activity() {
                 10 -> { val enabled = !prefs.getBoolean("automatic_updates", true); prefs.edit().putBoolean("automatic_updates", enabled).apply(); Toast.makeText(this, "Automatic updates " + if (enabled) "enabled" else "disabled", Toast.LENGTH_SHORT).show() }
                 11 -> addTab("https://quietchat-rho.vercel.app")
                 12 -> toggleReadingMode()
-                13 -> showProfilesDialog()
+                13 -> showProfilesScreen()
+                14 -> showSettingsScreen()
             }
             true
         }
