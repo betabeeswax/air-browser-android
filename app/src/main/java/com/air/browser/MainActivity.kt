@@ -518,6 +518,7 @@ class MainActivity : Activity() {
             .setItems(items.toTypedArray()) { _, which ->
                 when {
                     which < names.size -> {
+                        saveTabs()
                         activeProfile = names[which]
                         basePrefs.edit().putString("last_profile", activeProfile).apply()
                         recreate()
@@ -531,6 +532,7 @@ class MainActivity : Activity() {
                                 if (name.isNotBlank() && names.none { it.equals(name, true) }) {
                                     val updated = JSONArray()
                                     (names + name).forEach { updated.put(it) }
+                                    saveTabs()
                                     basePrefs.edit().putString("profiles", updated.toString()).putString("last_profile", name).apply()
                                     activeProfile = name
                                     recreate()
