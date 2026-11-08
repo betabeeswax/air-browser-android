@@ -17,7 +17,7 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile = file(System.getenv("AIR_SIGNING_KEYSTORE") ?: "air-release.jks")
+            storeFile = rootProject.file(System.getenv("AIR_SIGNING_KEYSTORE") ?: "app/air-release.jks")
             storePassword = System.getenv("AIR_SIGNING_STORE_PASSWORD")
             keyAlias = System.getenv("AIR_SIGNING_KEY_ALIAS")
             keyPassword = System.getenv("AIR_SIGNING_KEY_PASSWORD")
