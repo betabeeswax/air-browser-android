@@ -451,7 +451,7 @@ class MainActivity : Activity() {
                 }
             } catch (_: Exception) { }
             runOnUiThread {
-                val currentBuild = BuildConfig.VERSION_CODE
+                val currentBuild = packageManager.getPackageInfo(packageName, 0).longVersionCode.toInt()
                 if (latestBuild > currentBuild && downloadUrl.isNotBlank()) {
                     AlertDialog.Builder(this).setTitle("AIR Browser update available")
                         .setMessage("AIR Browser Android build $latestBuild is available. Would you like to update now or later?")
