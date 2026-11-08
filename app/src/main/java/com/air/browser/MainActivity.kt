@@ -443,7 +443,7 @@ class MainActivity : Activity() {
                     val release = releases.optJSONObject(i) ?: continue
                     if (release.optBoolean("draft") || release.optBoolean("prerelease")) continue
                     val tag = release.optString("tag_name")
-                    val build = Regex("(\\\\d+)$").find(tag)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
+                    val build = Regex("(\\d+)$").find(tag)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
                     val assets = release.optJSONArray("assets") ?: JSONArray()
                     var apk = ""
                     for (j in 0 until assets.length()) { val asset = assets.optJSONObject(j) ?: continue; if (asset.optString("name") == "AIR-Browser-Android.apk") apk = asset.optString("browser_download_url") }
@@ -451,7 +451,7 @@ class MainActivity : Activity() {
                 }
             } catch (_: Exception) { }
             runOnUiThread {
-                val currentBuild = packageManager.getPackageInfo(packageName, 0).longVersionCode.toInt()
+                val currentBuild = packageManager.getPackageInfo(packageName, 0).versionCode
                 if (latestBuild > currentBuild && downloadUrl.isNotBlank()) {
                     AlertDialog.Builder(this).setTitle("AIR Browser update available")
                         .setMessage("AIR Browser Android build $latestBuild is available. Would you like to update now or later?")
