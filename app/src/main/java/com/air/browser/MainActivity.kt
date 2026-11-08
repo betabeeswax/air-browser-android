@@ -116,7 +116,7 @@ class MainActivity : Activity() {
         addressRow.addView(reloadButton, buttonParams())
 
         addressBar = EditText(this).apply {
-            hint = "Search or enter website"
+            hint = "Search the web"
             setHintTextColor(Color.rgb(160, 173, 195))
             setTextColor(Color.WHITE)
             textSize = 15f
