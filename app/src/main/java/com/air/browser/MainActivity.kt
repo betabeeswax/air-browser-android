@@ -560,7 +560,7 @@ class MainActivity : Activity() {
             addView(panelButton("Clear cookies and website data") { clearWebsiteData() }, settingParams())
             addView(panelButton("Clear cache") { tabs.forEach { it.webView.clearCache(true) }; Toast.makeText(this@MainActivity, "Cache cleared.", Toast.LENGTH_SHORT).show() }, settingParams())
             addView(panelLabel("ABOUT"))
-            addView(TextView(this@MainActivity).apply { text = "AIR Browser for Android\nAIR Sync encrypts your backup before upload. Passwords, cookies and active sessions are not included."; textSize = 13f; setTextColor(Color.rgb(158, 172, 197)); setPadding(dp(4), dp(8), dp(4), dp(8)) })
+            addView(TextView(this@MainActivity).apply { text = "AIR Browser for Android\nAIR Sync encrypts bookmarks, history, settings, open tabs and saved passwords before upload. Cookies and active website sessions are excluded."; textSize = 13f; setTextColor(Color.rgb(158, 172, 197)); setPadding(dp(4), dp(8), dp(4), dp(8)) })
         }
     }
     private fun settingParams() = LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(8) }
@@ -605,7 +605,7 @@ class MainActivity : Activity() {
     private fun showAirSyncPrompt() {
         if (storedAirSession() == null) { showAirAccountScreen(); Toast.makeText(this, "Sign in first.", Toast.LENGTH_SHORT).show(); return }
         val pass = EditText(this).apply { hint = "Sync passphrase (10+ characters)"; inputType = 129 }
-        AlertDialog.Builder(this).setTitle("AIR Sync").setMessage("Use the same passphrase on desktop and mobile. Data is encrypted before upload. Cookies and active website sessions are excluded.")
+        AlertDialog.Builder(this).setTitle("AIR Sync").setMessage("Use the same passphrase on desktop and mobile. Bookmarks, history, settings, open tabs and saved passwords are encrypted before upload. Cookies and active website sessions are excluded.")
             .setView(pass).setItems(arrayOf("Back up this device", "Restore from cloud")) { _, which ->
                 val phrase = pass.text.toString()
                 if (phrase.length < 10) Toast.makeText(this, "Use at least 10 characters.", Toast.LENGTH_LONG).show() else runAirSync(phrase, which == 0)
