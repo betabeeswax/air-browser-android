@@ -61,6 +61,7 @@ class MainActivity : Activity() {
     private lateinit var webContainer: FrameLayout
     private lateinit var addressBar: EditText
     private lateinit var tabCount: TextView
+    private lateinit var tabStrip: LinearLayout
     private lateinit var backButton: TextView
     private lateinit var forwardButton: TextView
     private lateinit var reloadButton: TextView
@@ -145,6 +146,14 @@ class MainActivity : Activity() {
         header.addView(actionText("⋮") { showMainMenu(it) }, buttonParams())
         root.addView(header, LinearLayout.LayoutParams(-1, dp(46)))
 
+        val tabScroll = android.widget.HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            clipToPadding = false
+        }
+        tabStrip = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        tabScroll.addView(tabStrip, android.widget.HorizontalScrollView.LayoutParams(-2, dp(40)))
+        root.addView(tabScroll, LinearLayout.LayoutParams(-1, dp(42)))
+
         val addressRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -180,6 +189,8 @@ class MainActivity : Activity() {
         addressRow.addView(addressBar, LinearLayout.LayoutParams(0, dp(42), 1f).apply {
             setMargins(dp(3), 0, dp(3), 0)
         })
+        addressRow.addView(actionText("☆") { addBookmark() }, buttonParams())
+        addressRow.addView(actionText("Aa") { toggleReadingMode() }, buttonParams())
         addressRow.addView(actionText("Go") { navigateFromAddress() }, buttonParams())
         root.addView(addressRow, LinearLayout.LayoutParams(-1, dp(52)))
 
@@ -277,6 +288,7 @@ class MainActivity : Activity() {
                 if (!title.isNullOrBlank()) {
                     tab.title = title
                     updateTabCount()
+                    refreshTabStrip()
                 }
             }
 
@@ -308,6 +320,7 @@ class MainActivity : Activity() {
         val tab = tabs.firstOrNull { it.id == id } ?: return
         activeTabId = id
         tabs.forEach { it.webView.visibility = if (it.id == id) View.VISIBLE else View.GONE }
+        refreshTabStrip()
         addressBar.setText(if (isHome(tab.url)) "" else tab.url)
         updateTabCount()
         updateNavigationButtons()
@@ -328,6 +341,45 @@ class MainActivity : Activity() {
         }
         saveTabs()
         updateTabCount()
+        refreshTabStrip()
+    }
+
+    private fun refreshTabStrip() {
+        if (!::tabStrip.isInitialized) return
+        tabStrip.removeAllViews()
+        tabs.forEachIndexed { index, tab ->
+            val chip = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                background = rounded(if (tab.id == activeTabId) Color.rgb(37, 76, 121) else Color.rgb(25, 40, 62), dp(9))
+                setPadding(dp(9), 0, dp(4), 0)
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { switchToTab(tab.id) }
+            }
+            chip.addView(TextView(this).apply {
+                text = index.toString() + ". " + tab.title.ifBlank { "New tab" }
+                textSize = 11f
+                setTextColor(Color.WHITE)
+                maxWidth = dp(125)
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                gravity = Gravity.CENTER_VERTICAL
+            }, LinearLayout.LayoutParams(-2, dp(32)))
+            chip.addView(TextView(this).apply {
+                text = "×"; textSize = 16f; setTextColor(Color.rgb(190, 205, 225)); gravity = Gravity.CENTER
+                setPadding(dp(7), 0, dp(4), 0)
+                setOnClickListener { closeTab(tab.id) }
+            }, LinearLayout.LayoutParams(-2, dp(32)))
+            val lp = LinearLayout.LayoutParams(-2, dp(32)).apply { rightMargin = dp(6) }
+            tabStrip.addView(chip, lp)
+        }
+        val plus = TextView(this).apply {
+            text = "+"; textSize = 21f; gravity = Gravity.CENTER; setTextColor(Color.WHITE)
+            background = rounded(Color.rgb(28, 39, 61), dp(9)); setPadding(dp(12), 0, dp(12), 0)
+            setOnClickListener { addTab() }
+        }
+        tabStrip.addView(plus, LinearLayout.LayoutParams(-2, dp(32)))
     }
 
     private fun showTabsDialog() {
