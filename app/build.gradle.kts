@@ -43,3 +43,8 @@ android {
         jvmTarget = "17"
     }
 }
+
+
+dependencies {
+    implementation("androidx.core:core-ktx:1.15.0")
+}
