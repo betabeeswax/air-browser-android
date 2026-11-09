@@ -643,7 +643,7 @@ class MainActivity : Activity() {
         }
         prefs.edit().putString("bookmarks",toEntries("bookmarks").toString()).putString("history",toEntries("history").toString()).apply()
         val settings = data.optJSONObject("settings")
-        if (settings != null) { val e = prefs.edit(); settings.keys().forEach { k -> when(val v=settings.opt(k)) { is Boolean -> e.putBoolean(k,v); is Int -> e.putInt(k,v); is String -> e.putString(k,v) } }; e.apply(); applyBrowserTheme() }
+        if (settings != null) { val e = prefs.edit(); settings.keys().forEach { k -> when(val v=settings.opt(k)) { is Boolean -> e.putBoolean(k,v); is Int -> e.putInt(k,v); is String -> e.putString(k,v) } };\n            if (settings.has("defaultEngine")) e.putString("search_engine", settings.optString("defaultEngine"))\n            if (settings.has("automaticUpdates")) e.putBoolean("automatic_updates", settings.optBoolean("automaticUpdates"))\n            if (settings.has("restoreTabs")) e.putBoolean("restore_tabs", settings.optBoolean("restoreTabs"))\n            if (settings.has("startup")) e.putBoolean("restore_tabs", settings.optString("startup") == "continue")\n            e.apply(); applyBrowserTheme() }
         val urls = data.optJSONArray("openTabs") ?: JSONArray()
         tabs.toList().forEach { closeTab(it.id) }
         if (urls.length()==0) addTab(HOME_BASE) else for (i in 0 until minOf(urls.length(),MAX_RESTORED_TABS)) addTab(urls.optString(i),switchTo=i==minOf(urls.length(),MAX_RESTORED_TABS)-1)
