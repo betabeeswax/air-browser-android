@@ -1089,9 +1089,9 @@ class MainActivity : Activity() {
                 setDataAndType(apkUri, "application/vnd.android.package-archive")
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
+            startActivity(installIntent)
             clearPendingUpdate()
             installerLaunched = true
-            startActivity(installIntent)
         } catch (_: Exception) {
             installerLaunched = false
             Toast.makeText(this, "Android couldn't open the installer. Try opening the update again from AIR Browser.", Toast.LENGTH_LONG).show()
