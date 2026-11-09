@@ -13,6 +13,11 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.Environment
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import java.security.KeyStore
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -296,7 +301,7 @@ class MainActivity : Activity() {
                     updateNavigationButtons()
                     updateBookmarkButton()
                 }
-                if (!isHome(url)) addHistory(tab.title, url)
+                if (!isHome(url)) { addHistory(tab.title, url); fillSavedPassword(tab) }
                 saveTabs()
             }
         }
@@ -540,6 +545,8 @@ class MainActivity : Activity() {
             addView(panelButton("Restore open tabs: " + if (prefs.getBoolean("restore_tabs", true)) "On" else "Off") {
                 prefs.edit().putBoolean("restore_tabs", !prefs.getBoolean("restore_tabs", true)).apply(); showSettingsScreen()
             }, settingParams())
+            addView(panelLabel("PASSWORDS"))
+            addView(panelButton("Password manager") { showPasswordManager() }, settingParams())
             addView(panelLabel("AIR ACCOUNT & SYNC"))
             addView(panelButton(if (storedAirSession() == null) "Sign in / Create AIR Account" else "AIR Account: " + (storedAirSession()?.optJSONObject("user")?.optString("email") ?: "Signed in")) { showAirAccountScreen() }, settingParams())
             addView(panelButton("Back up or restore with AIR Sync") { showAirSyncPrompt() }, settingParams())
@@ -598,7 +605,7 @@ class MainActivity : Activity() {
     private fun showAirSyncPrompt() {
         if (storedAirSession() == null) { showAirAccountScreen(); Toast.makeText(this, "Sign in first.", Toast.LENGTH_SHORT).show(); return }
         val pass = EditText(this).apply { hint = "Sync passphrase (10+ characters)"; inputType = 129 }
-        AlertDialog.Builder(this).setTitle("AIR Sync").setMessage("Use the same passphrase on desktop and mobile. Data is encrypted before upload. Passwords, cookies and active sessions are excluded.")
+        AlertDialog.Builder(this).setTitle("AIR Sync").setMessage("Use the same passphrase on desktop and mobile. Data is encrypted before upload. Cookies and active website sessions are excluded.")
             .setView(pass).setItems(arrayOf("Back up this device", "Restore from cloud")) { _, which ->
                 val phrase = pass.text.toString()
                 if (phrase.length < 10) Toast.makeText(this, "Use at least 10 characters.", Toast.LENGTH_LONG).show() else runAirSync(phrase, which == 0)
@@ -620,7 +627,7 @@ class MainActivity : Activity() {
                     val packed = JSONObject(rows.getJSONObject(0).optString("encrypted_payload"))
                     val data = JSONObject(decryptSyncPayload(packed, passphrase))
                     if (data.optString("profile") != profile) throw Exception("Backup belongs to another profile.")
-                    runOnUiThread { AlertDialog.Builder(this).setTitle("Restore AIR Sync?").setMessage("This replaces bookmarks, history, settings and open tabs for $profile.")
+                    runOnUiThread { AlertDialog.Builder(this).setTitle("Restore AIR Sync?").setMessage("This replaces bookmarks, history, saved passwords, settings and open tabs for $profile.")
                         .setNegativeButton("Cancel", null).setPositiveButton("Restore") { _, _ ->
                             try { applySyncPayload(data); Toast.makeText(this, "AIR Sync restore complete.", Toast.LENGTH_LONG).show() }
                             catch (e: Exception) { Toast.makeText(this, "Restore failed: " + e.message, Toast.LENGTH_LONG).show() }
@@ -658,7 +665,7 @@ class MainActivity : Activity() {
         val openTabs = JSONArray()
         tabs.filter { it.url.startsWith("http://") || it.url.startsWith("https://") }.forEach { openTabs.put(it.url) }
         return JSONObject().put("profile", profile).put("bookmarks", bookmarks).put("history", history)
-            .put("settings", settings).put("startBackground", "").put("openTabs", openTabs)
+            .put("passwords", readPasswordVault()).put("settings", settings).put("startBackground", "").put("openTabs", openTabs)
     }
     private fun applySyncPayload(data: JSONObject) {
         fun toEntries(key: String): JSONArray {
@@ -667,6 +674,7 @@ class MainActivity : Activity() {
             return out
         }
         prefs.edit().putString("bookmarks",toEntries("bookmarks").toString()).putString("history",toEntries("history").toString()).apply()
+        data.optJSONArray("passwords")?.let { writePasswordVault(it) }
         val settings = data.optJSONObject("settings")
         if (settings != null) {
             val e = prefs.edit()
@@ -701,6 +709,65 @@ class MainActivity : Activity() {
             .filter { it.startsWith("https://") || it.startsWith("http://") }.take(MAX_RESTORED_TABS)
         if (validUrls.isEmpty()) addTab(HOME_BASE)
         else validUrls.forEachIndexed { index, url -> addTab(url, switchTo = index == validUrls.lastIndex) }
+    }
+    private fun passwordVaultKey(): SecretKey {
+        val alias = "air_browser_password_vault"
+        val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        if (store.containsAlias(alias)) return store.getKey(alias, null) as SecretKey
+        val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+        generator.init(KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+            .setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+            .setRandomizedEncryptionRequired(true).build())
+        return generator.generateKey()
+    }
+
+    private fun readPasswordVault(): JSONArray = try {
+        val packed = Base64.getDecoder().decode(prefs.getString("password_vault_v1", "") ?: "")
+        if (packed.size <= 12) JSONArray() else {
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.DECRYPT_MODE, passwordVaultKey(), GCMParameterSpec(128, packed.copyOfRange(0, 12)))
+            JSONArray(String(cipher.doFinal(packed.copyOfRange(12, packed.size)), StandardCharsets.UTF_8))
+        }
+    } catch (_: Exception) { JSONArray() }
+
+    private fun writePasswordVault(records: JSONArray) {
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, passwordVaultKey())
+        val packed = cipher.iv + cipher.doFinal(records.toString().toByteArray(StandardCharsets.UTF_8))
+        prefs.edit().putString("password_vault_v1", Base64.getEncoder().encodeToString(packed)).apply()
+    }
+
+    private fun fillSavedPassword(tab: BrowserTab) {
+        val uri = Uri.parse(tab.url)
+        if (uri.scheme != "https") return
+        val origin = uri.scheme + "://" + uri.authority
+        val record = (0 until readPasswordVault().length()).mapNotNull { readPasswordVault().optJSONObject(it) }.firstOrNull { it.optString("url").equals(origin, true) } ?: return
+        val data = JSONObject().put("username", record.optString("username")).put("password", record.optString("password"))
+        val script = "(()=>{const d=" + data.toString() + ";const p=document.querySelector('input[type=password]');if(!p||p.value)return;const u=document.querySelector('input[autocomplete=username],input[type=email],input[name*=user i],input[type=text]');if(u&&!u.value){u.value=d.username||'';u.dispatchEvent(new Event('input',{bubbles:true}));}p.value=d.password||'';p.dispatchEvent(new Event('input',{bubbles:true}));return true})()"
+        tab.webView.evaluateJavascript(script, null)
+    }
+
+    private fun showPasswordManager() {
+        val records = readPasswordVault()
+        val labels = (0 until records.length()).map { i -> val item = records.optJSONObject(i); (item?.optString("url") ?: "Saved password") + " — " + (item?.optString("username") ?: "") }.toMutableList()
+        labels.add("＋ Add password")
+        AlertDialog.Builder(this).setTitle("Password manager").setItems(labels.toTypedArray()) { _, which ->
+            if (which == records.length()) {
+                val fields = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(8), dp(12), dp(8)) }
+                val website = EditText(this).apply { hint = "Website (https://example.com)"; setSingleLine(true) }
+                val username = EditText(this).apply { hint = "Username"; setSingleLine(true) }
+                val password = EditText(this).apply { hint = "Password"; inputType = 129; setSingleLine(true) }
+                fields.addView(website); fields.addView(username); fields.addView(password)
+                AlertDialog.Builder(this).setTitle("Save password").setView(fields).setNegativeButton("Cancel", null).setPositiveButton("Save") { _, _ ->
+                    val uri = Uri.parse(website.text.toString().trim())
+                    if (uri.scheme != "https" || uri.authority.isNullOrBlank() || password.text.isNullOrEmpty()) Toast.makeText(this, "Enter an HTTPS website and password.", Toast.LENGTH_LONG).show()
+                    else { val latest = readPasswordVault(); latest.put(JSONObject().put("url", uri.scheme + "://" + uri.authority).put("username", username.text.toString()).put("password", password.text.toString()).put("name", uri.host ?: "")); writePasswordVault(latest); Toast.makeText(this, "Password saved securely.", Toast.LENGTH_SHORT).show() }
+                }.show()
+            } else {
+                val item = records.optJSONObject(which) ?: return@setItems
+                AlertDialog.Builder(this).setTitle("Delete saved password?").setMessage(item.optString("url")).setNegativeButton("Cancel", null).setPositiveButton("Delete") { _, _ -> records.remove(which); writePasswordVault(records); showPasswordManager() }.show()
+            }
+        }.setNegativeButton("Close", null).show()
     }
     private fun encryptSyncPayload(plain: String, passphrase: String): JSONObject {
         val salt=ByteArray(16).also { SecureRandom().nextBytes(it) }; val iv=ByteArray(12).also { SecureRandom().nextBytes(it) }
