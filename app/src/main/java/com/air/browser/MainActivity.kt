@@ -35,6 +35,14 @@ import org.json.JSONObject
 import java.net.URLEncoder
 import java.net.HttpURLConnection
 import java.net.URL
+import javax.crypto.Cipher
+import javax.crypto.SecretKeyFactory
+import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.PBEKeySpec
+import javax.crypto.spec.SecretKeySpec
+import java.security.SecureRandom
+import java.util.Base64
+import java.nio.charset.StandardCharsets
 
 class MainActivity : Activity() {
     private data class BrowserTab(
@@ -47,6 +55,9 @@ class MainActivity : Activity() {
     companion object {
         private const val HOME_BASE = "https://air-browser.local/"
         private const val PREFS = "air_browser_local"
+        private const val AIR_SUPABASE_URL = "https://rkwpxzotvneoavrczkzo.supabase.co"
+        private const val AIR_SUPABASE_KEY = "sb_publishable_XZ71KE8FXhRoPdC1K7tEJw_tN4wReB_"
+        private const val DESKTOP_USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
         private const val MAX_RESTORED_TABS = 8
     }
 
@@ -234,9 +245,11 @@ class MainActivity : Activity() {
     private fun addTab(initialUrl: String = HOME_BASE, switchTo: Boolean = true): BrowserTab {
         val webView = WebView(this)
         webView.setBackgroundColor(Color.WHITE)
-        webView.settings.javaScriptEnabled = true
+        webView.settings.javaScriptEnabled = prefs.getBoolean("javascript", true)
         webView.settings.domStorageEnabled = true
-        webView.settings.loadsImagesAutomatically = true
+        webView.settings.loadsImagesAutomatically = prefs.getBoolean("load_images", true)
+        webView.settings.textZoom = prefs.getInt("page_zoom", 100)
+        webView.settings.userAgentString = if (prefs.getBoolean("desktop_site", false)) DESKTOP_USER_AGENT else null
         webView.settings.javaScriptCanOpenWindowsAutomatically = true
         webView.settings.setSupportMultipleWindows(true)
         webView.settings.builtInZoomControls = true
@@ -486,35 +499,188 @@ class MainActivity : Activity() {
             addView(panelButton("Colour theme: " + (prefs.getString("theme", "dark") ?: "dark").replaceFirstChar { it.uppercase() }) {
                 val themes = arrayOf("Dark", "Midnight", "Ocean", "Purple", "Forest", "Sunset", "Rose", "Light")
                 AlertDialog.Builder(this@MainActivity).setTitle("Colour theme")
-                    .setSingleChoiceItems(themes, themes.indexOf((prefs.getString("theme", "dark") ?: "dark").replaceFirstChar { it.uppercase() }).coerceAtLeast(0)) { dialog, which ->
-                        prefs.edit().putString("theme", themes[which].lowercase()).apply()
-                        dialog.dismiss()
-                        applyBrowserTheme()
-                        showSettingsScreen()
+                    .setSingleChoiceItems(themes, themes.indexOf((prefs.getString("theme", "dark") ?: "dark").replaceFirstChar { it.uppercase() }).coerceAtLeast(0)) { d, w ->
+                        prefs.edit().putString("theme", themes[w].lowercase()).apply(); d.dismiss(); applyBrowserTheme(); showSettingsScreen()
                     }.setNegativeButton("Cancel", null).show()
-            }, LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(8) })
+            }, settingParams())
             addView(panelButton("Default search engine: " + (prefs.getString("search_engine", "Google") ?: "Google")) {
                 val engines = arrayOf("Google", "Bing", "DuckDuckGo")
                 AlertDialog.Builder(this@MainActivity).setTitle("Default search engine")
-                    .setSingleChoiceItems(engines, engines.indexOf(prefs.getString("search_engine", "Google")).coerceAtLeast(0)) { dialog, which ->
-                        prefs.edit().putString("search_engine", engines[which]).apply(); dialog.dismiss(); showSettingsScreen()
+                    .setSingleChoiceItems(engines, engines.indexOf(prefs.getString("search_engine", "Google")).coerceAtLeast(0)) { d, w ->
+                        prefs.edit().putString("search_engine", engines[w]).apply(); d.dismiss(); showSettingsScreen()
                     }.setNegativeButton("Cancel", null).show()
-            }, LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(8) })
-            addView(panelButton("Manage profiles") { showProfilesScreen() }, LinearLayout.LayoutParams(-1, dp(48)))
+            }, settingParams())
+            addView(panelButton("Manage profiles") { showProfilesScreen() }, settingParams())
+            addView(panelLabel("BROWSING"))
+            addView(panelButton("JavaScript: " + if (prefs.getBoolean("javascript", true)) "On" else "Off") {
+                prefs.edit().putBoolean("javascript", !prefs.getBoolean("javascript", true)).apply()
+                tabs.forEach { it.webView.settings.javaScriptEnabled = prefs.getBoolean("javascript", true) }; showSettingsScreen()
+            }, settingParams())
+            addView(panelButton("Load images: " + if (prefs.getBoolean("load_images", true)) "On" else "Off") {
+                prefs.edit().putBoolean("load_images", !prefs.getBoolean("load_images", true)).apply()
+                tabs.forEach { it.webView.settings.loadsImagesAutomatically = prefs.getBoolean("load_images", true) }; showSettingsScreen()
+            }, settingParams())
+            addView(panelButton("Desktop site: " + if (prefs.getBoolean("desktop_site", false)) "On" else "Off") {
+                prefs.edit().putBoolean("desktop_site", !prefs.getBoolean("desktop_site", false)).apply()
+                tabs.forEach { it.webView.settings.userAgentString = if (prefs.getBoolean("desktop_site", false)) DESKTOP_USER_AGENT else null; it.webView.reload() }; showSettingsScreen()
+            }, settingParams())
+            addView(panelButton("Page zoom: " + prefs.getInt("page_zoom", 100) + "%") {
+                val nums = intArrayOf(75, 90, 100, 110, 125, 150)
+                AlertDialog.Builder(this@MainActivity).setTitle("Page zoom")
+                    .setSingleChoiceItems(nums.map { "$it%" }.toTypedArray(), nums.indexOf(prefs.getInt("page_zoom", 100)).coerceAtLeast(0)) { d, w ->
+                        prefs.edit().putInt("page_zoom", nums[w]).apply(); tabs.forEach { it.webView.settings.textZoom = nums[w] }; d.dismiss(); showSettingsScreen()
+                    }.setNegativeButton("Cancel", null).show()
+            }, settingParams())
             addView(panelLabel("STARTUP"))
             addView(panelButton("Restore open tabs: " + if (prefs.getBoolean("restore_tabs", true)) "On" else "Off") {
                 prefs.edit().putBoolean("restore_tabs", !prefs.getBoolean("restore_tabs", true)).apply(); showSettingsScreen()
-            }, LinearLayout.LayoutParams(-1, dp(48)))
+            }, settingParams())
+            addView(panelLabel("AIR ACCOUNT & SYNC"))
+            addView(panelButton(if (storedAirSession() == null) "Sign in / Create AIR Account" else "AIR Account: " + (storedAirSession()?.optJSONObject("user")?.optString("email") ?: "Signed in")) { showAirAccountScreen() }, settingParams())
+            addView(panelButton("Back up or restore with AIR Sync") { showAirSyncPrompt() }, settingParams())
             addView(panelLabel("UPDATES"))
             addView(panelButton("Automatic updates: " + if (prefs.getBoolean("automatic_updates", true)) "On" else "Off") {
                 prefs.edit().putBoolean("automatic_updates", !prefs.getBoolean("automatic_updates", true)).apply(); showSettingsScreen()
-            }, LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(8) })
-            addView(panelButton("Check for updates") { checkForUpdates(true) }, LinearLayout.LayoutParams(-1, dp(48)))
-            addView(panelLabel("PRIVACY"))
-            addView(panelButton("Clear browsing history") { clearHistory() }, LinearLayout.LayoutParams(-1, dp(48)))
+            }, settingParams())
+            addView(panelButton("Check for updates") { checkForUpdates(true) }, settingParams())
+            addView(panelLabel("PRIVACY & DATA"))
+            addView(panelButton("Clear browsing history") { clearHistory() }, settingParams())
+            addView(panelButton("Clear cookies and website data") { clearWebsiteData() }, settingParams())
+            addView(panelButton("Clear cache") { tabs.forEach { it.webView.clearCache(true) }; Toast.makeText(this@MainActivity, "Cache cleared.", Toast.LENGTH_SHORT).show() }, settingParams())
             addView(panelLabel("ABOUT"))
-            addView(TextView(this@MainActivity).apply { text = "AIR Browser for Android\\nSettings and browser data are stored on this device."; textSize = 13f; setTextColor(Color.rgb(158, 172, 197)); setPadding(dp(4), dp(8), dp(4), dp(8)) })
+            addView(TextView(this@MainActivity).apply { text = "AIR Browser for Android\nAIR Sync encrypts your backup before upload. Passwords, cookies and active sessions are not included."; textSize = 13f; setTextColor(Color.rgb(158, 172, 197)); setPadding(dp(4), dp(8), dp(4), dp(8)) })
         }
+    }
+    private fun settingParams() = LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(8) }
+    private fun clearWebsiteData() {
+        AlertDialog.Builder(this).setTitle("Clear website data?").setMessage("This clears cookies and cached site data. You may be signed out of websites.")
+            .setNegativeButton("Cancel", null).setPositiveButton("Clear") { _, _ ->
+                CookieManager.getInstance().removeAllCookies { }; CookieManager.getInstance().flush()
+                tabs.forEach { it.webView.clearCache(true); it.webView.clearFormData() }
+                Toast.makeText(this, "Website data cleared.", Toast.LENGTH_SHORT).show()
+            }.show()
+    }
+    private fun storedAirSession(): JSONObject? = try { prefs.getString("air_auth_session", null)?.let { JSONObject(it) } } catch (_: Exception) { null }
+    private fun showAirAccountScreen() {
+        showInAppPanel("AIR Account") {
+            val session = storedAirSession()
+            if (session != null) {
+                addView(TextView(this@MainActivity).apply { text = "Signed in as " + (session.optJSONObject("user")?.optString("email") ?: "AIR Account"); setTextColor(Color.WHITE); textSize = 15f; setPadding(0, dp(10), 0, dp(14)) })
+                addView(panelButton("Sign out") { prefs.edit().remove("air_auth_session").apply(); showAirAccountScreen() }, settingParams())
+            } else {
+                val email = EditText(this@MainActivity).apply { hint = "Email address"; setSingleLine(true) }
+                val password = EditText(this@MainActivity).apply { hint = "Password"; inputType = 129; setSingleLine(true) }
+                addView(panelLabel("EMAIL")); addView(email, LinearLayout.LayoutParams(-1, dp(50)))
+                addView(panelLabel("PASSWORD")); addView(password, LinearLayout.LayoutParams(-1, dp(50)))
+                addView(panelButton("Sign in") { performAirAuth(email.text.toString().trim(), password.text.toString(), false) }, settingParams())
+                addView(panelButton("Create AIR Account") { performAirAuth(email.text.toString().trim(), password.text.toString(), true) }, settingParams())
+                addView(TextView(this@MainActivity).apply { text = "Use your existing desktop AIR Account. Passwords must be at least 8 characters."; setTextColor(Color.LTGRAY); textSize = 12f })
+            }
+        }
+    }
+    private fun performAirAuth(email: String, password: String, signup: Boolean) {
+        if (!email.contains("@") || password.length < 8) { Toast.makeText(this, "Enter a valid email and a password of at least 8 characters.", Toast.LENGTH_LONG).show(); return }
+        Thread {
+            try {
+                val endpoint = if (signup) "/auth/v1/signup" else "/auth/v1/token?grant_type=password"
+                val result = airRequest("POST", endpoint, JSONObject().put("email", email).put("password", password), null)
+                if (result.has("access_token")) { prefs.edit().putString("air_auth_session", result.toString()).apply(); runOnUiThread { showAirAccountScreen(); Toast.makeText(this, "Signed in to AIR Account.", Toast.LENGTH_SHORT).show() } }
+                else if (signup) runOnUiThread { Toast.makeText(this, "Account created. Check your email if confirmation is required, then sign in.", Toast.LENGTH_LONG).show() }
+                else throw Exception("No session was returned.")
+            } catch (e: Exception) { runOnUiThread { Toast.makeText(this, "AIR Account: " + (e.message ?: "Sign-in failed"), Toast.LENGTH_LONG).show() } }
+        }.start()
+    }
+    private fun showAirSyncPrompt() {
+        if (storedAirSession() == null) { showAirAccountScreen(); Toast.makeText(this, "Sign in first.", Toast.LENGTH_SHORT).show(); return }
+        val pass = EditText(this).apply { hint = "Sync passphrase (10+ characters)"; inputType = 129 }
+        AlertDialog.Builder(this).setTitle("AIR Sync").setMessage("Use the same passphrase on desktop and mobile. Data is encrypted before upload. Passwords, cookies and active sessions are excluded.")
+            .setView(pass).setItems(arrayOf("Back up this device", "Restore from cloud")) { _, which ->
+                val phrase = pass.text.toString()
+                if (phrase.length < 10) Toast.makeText(this, "Use at least 10 characters.", Toast.LENGTH_LONG).show() else runAirSync(phrase, which == 0)
+            }.setNegativeButton("Cancel", null).show()
+    }
+    private fun runAirSync(passphrase: String, backup: Boolean) {
+        Thread {
+            try {
+                val session = refreshAirSession(); val profile = activeProfile
+                if (backup) {
+                    val encrypted = encryptSyncPayload(buildSyncPayload(profile).toString(), passphrase)
+                    val row = JSONObject().put("user_id", session.getJSONObject("user").getString("id")).put("profile_key", profile).put("profile_name", profile).put("encrypted_payload", encrypted).put("encryption_version", 1).put("updated_at", java.time.Instant.now().toString())
+                    airRequest("POST", "/rest/v1/air_sync_profiles?on_conflict=user_id%2Cprofile_key", row, session.getString("access_token"), "resolution=merge-duplicates,return=minimal")
+                    runOnUiThread { Toast.makeText(this, "AIR Sync backup complete for $profile.", Toast.LENGTH_LONG).show() }
+                } else {
+                    val rows = airRequestArray("/rest/v1/air_sync_profiles?select=profile_name,encrypted_payload&profile_key=eq." + URLEncoder.encode(profile, "UTF-8") + "&limit=1", session.getString("access_token"))
+                    if (rows.length() == 0) throw Exception("No cloud backup exists for this profile yet.")
+                    val packed = rows.getJSONObject(0).getJSONObject("encrypted_payload")
+                    val data = JSONObject(decryptSyncPayload(packed, passphrase))
+                    if (data.optString("profile") != profile) throw Exception("Backup belongs to another profile.")
+                    runOnUiThread { AlertDialog.Builder(this).setTitle("Restore AIR Sync?").setMessage("This replaces bookmarks, history, settings and open tabs for $profile.")
+                        .setNegativeButton("Cancel", null).setPositiveButton("Restore") { _, _ ->
+                            try { applySyncPayload(data); Toast.makeText(this, "AIR Sync restore complete.", Toast.LENGTH_LONG).show() }
+                            catch (e: Exception) { Toast.makeText(this, "Restore failed: " + e.message, Toast.LENGTH_LONG).show() }
+                        }.show() }
+                }
+            } catch (e: Exception) { runOnUiThread { Toast.makeText(this, "AIR Sync failed: " + (e.message ?: "Unknown error"), Toast.LENGTH_LONG).show() } }
+        }.start()
+    }
+    private fun buildSyncPayload(profile: String): JSONObject {
+        val bookmarks = JSONArray(); val savedBookmarks = readArray("bookmarks")
+        for (i in 0 until savedBookmarks.length()) bookmarks.put(savedBookmarks.optJSONObject(i)?.optString("url") ?: savedBookmarks.optString(i))
+        val history = JSONArray(); val savedHistory = readArray("history")
+        for (i in 0 until savedHistory.length()) history.put(savedHistory.optJSONObject(i)?.optString("url") ?: savedHistory.optString(i))
+        val settings = JSONObject()
+        prefs.all.forEach { (k, v) -> if (k in setOf("theme","search_engine","restore_tabs","automatic_updates","javascript","load_images","desktop_site","page_zoom","homepage")) when(v) {
+            is Boolean -> settings.put(k,v); is Int -> settings.put(k,v); is String -> settings.put(k,v)
+        } }
+        val openTabs = JSONArray(); tabs.filter { it.url.startsWith("http://") || it.url.startsWith("https://") }.forEach { openTabs.put(it.url) }
+        return JSONObject().put("profile",profile).put("bookmarks",bookmarks).put("history",history).put("settings",settings).put("startBackground","").put("openTabs",openTabs)
+    }
+    private fun applySyncPayload(data: JSONObject) {
+        fun toEntries(key: String): JSONArray {
+            val out = JSONArray(); val source = data.optJSONArray(key) ?: JSONArray()
+            for (i in 0 until source.length()) { val url = source.optString(i); if (url.startsWith("https://") || url.startsWith("http://")) out.put(JSONObject().put("title", Uri.parse(url).host ?: url).put("url",url)) }
+            return out
+        }
+        prefs.edit().putString("bookmarks",toEntries("bookmarks").toString()).putString("history",toEntries("history").toString()).apply()
+        val settings = data.optJSONObject("settings")
+        if (settings != null) { val e = prefs.edit(); settings.keys().forEach { k -> when(val v=settings.opt(k)) { is Boolean -> e.putBoolean(k,v); is Int -> e.putInt(k,v); is String -> e.putString(k,v) } }; e.apply(); applyBrowserTheme() }
+        val urls = data.optJSONArray("openTabs") ?: JSONArray()
+        tabs.toList().forEach { closeTab(it.id) }
+        if (urls.length()==0) addTab(HOME_BASE) else for (i in 0 until minOf(urls.length(),MAX_RESTORED_TABS)) addTab(urls.optString(i),switchTo=i==minOf(urls.length(),MAX_RESTORED_TABS)-1)
+    }
+    private fun encryptSyncPayload(plain: String, passphrase: String): JSONObject {
+        val salt=ByteArray(16).also { SecureRandom().nextBytes(it) }; val iv=ByteArray(12).also { SecureRandom().nextBytes(it) }
+        val spec=PBEKeySpec(passphrase.toCharArray(),salt,250000,256); val key=SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded; spec.clearPassword()
+        val cipher=Cipher.getInstance("AES/GCM/NoPadding"); cipher.init(Cipher.ENCRYPT_MODE,SecretKeySpec(key,"AES"),GCMParameterSpec(128,iv))
+        return JSONObject().put("version",1).put("salt",Base64.getEncoder().encodeToString(salt)).put("iv",Base64.getEncoder().encodeToString(iv)).put("ciphertext",Base64.getEncoder().encodeToString(cipher.doFinal(plain.toByteArray(StandardCharsets.UTF_8))))
+    }
+    private fun decryptSyncPayload(p: JSONObject, passphrase: String): String {
+        if(p.optInt("version")!=1) throw Exception("Unsupported backup version.")
+        val spec=PBEKeySpec(passphrase.toCharArray(),Base64.getDecoder().decode(p.getString("salt")),250000,256); val key=SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded; spec.clearPassword()
+        val cipher=Cipher.getInstance("AES/GCM/NoPadding"); cipher.init(Cipher.DECRYPT_MODE,SecretKeySpec(key,"AES"),GCMParameterSpec(128,Base64.getDecoder().decode(p.getString("iv"))))
+        return String(cipher.doFinal(Base64.getDecoder().decode(p.getString("ciphertext"))),StandardCharsets.UTF_8)
+    }
+    private fun refreshAirSession(): JSONObject {
+        var session=storedAirSession() ?: throw Exception("Sign in to AIR Account first.")
+        val refresh=session.optString("refresh_token")
+        if(refresh.isNotBlank()){ session=airRequest("POST","/auth/v1/token?grant_type=refresh_token",JSONObject().put("refresh_token",refresh),null); prefs.edit().putString("air_auth_session",session.toString()).apply() }
+        return session
+    }
+    private fun airRequest(method: String, endpoint: String, body: JSONObject?, token: String?, prefer: String? = null): JSONObject {
+        val c=(URL(AIR_SUPABASE_URL+endpoint).openConnection() as HttpURLConnection)
+        c.requestMethod=method; c.connectTimeout=20000; c.readTimeout=20000; c.setRequestProperty("apikey",AIR_SUPABASE_KEY); c.setRequestProperty("Content-Type","application/json")
+        if(token!=null)c.setRequestProperty("Authorization","Bearer $token"); if(prefer!=null)c.setRequestProperty("Prefer",prefer)
+        if(body!=null){c.doOutput=true;c.outputStream.use{it.write(body.toString().toByteArray(StandardCharsets.UTF_8))}}
+        val status=c.responseCode; val stream=if(status in 200..299)c.inputStream else c.errorStream; val raw=stream?.bufferedReader()?.use{it.readText()} ?: ""
+        if(status !in 200..299)throw Exception("Server $status: "+raw.take(180))
+        return if(raw.isBlank()) JSONObject() else JSONObject(raw)
+    }
+    private fun airRequestArray(endpoint: String, token: String): JSONArray {
+        val c=(URL(AIR_SUPABASE_URL+endpoint).openConnection() as HttpURLConnection)
+        c.requestMethod="GET"; c.connectTimeout=20000; c.readTimeout=20000; c.setRequestProperty("apikey",AIR_SUPABASE_KEY); c.setRequestProperty("Authorization","Bearer $token")
+        val status=c.responseCode; val stream=if(status in 200..299)c.inputStream else c.errorStream; val raw=stream?.bufferedReader()?.use{it.readText()} ?: ""
+        if(status !in 200..299)throw Exception("Server $status: "+raw.take(180))
+        return JSONArray(raw)
     }
 
     private fun navigateFromAddress() {
