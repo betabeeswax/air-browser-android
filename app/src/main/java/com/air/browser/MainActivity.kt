@@ -76,6 +76,7 @@ class MainActivity : Activity() {
     private var activeProfile = "Personal"
     private var updateReceiverRegistered = false
     private var installerLaunched = false
+    private var installSettingsOpened = false
     private val updatePrefs by lazy { getSharedPreferences("air_browser_updates", Context.MODE_PRIVATE) }
     private val updateDownloadReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -1072,10 +1073,13 @@ class MainActivity : Activity() {
             return
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
-            Toast.makeText(this, "Allow AIR Browser to install updates. The downloaded update is saved.", Toast.LENGTH_LONG).show()
-            try {
-                startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
-            } catch (_: Exception) { }
+            if (!installSettingsOpened) {
+                installSettingsOpened = true
+                Toast.makeText(this, "Allow AIR Browser to install updates. The downloaded update is saved.", Toast.LENGTH_LONG).show()
+                try {
+                    startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+                } catch (_: Exception) { }
+            }
             return
         }
         if (installerLaunched) return
@@ -1085,6 +1089,7 @@ class MainActivity : Activity() {
                 setDataAndType(apkUri, "application/vnd.android.package-archive")
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
+            clearPendingUpdate()
             installerLaunched = true
             startActivity(installIntent)
         } catch (_: Exception) {
