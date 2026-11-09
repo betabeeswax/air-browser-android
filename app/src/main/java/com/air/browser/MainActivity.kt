@@ -605,13 +605,13 @@ class MainActivity : Activity() {
                 val session = refreshAirSession(); val profile = activeProfile
                 if (backup) {
                     val encrypted = encryptSyncPayload(buildSyncPayload(profile).toString(), passphrase)
-                    val row = JSONObject().put("user_id", session.getJSONObject("user").getString("id")).put("profile_key", profile).put("profile_name", profile).put("encrypted_payload", encrypted).put("encryption_version", 1).put("updated_at", java.time.Instant.now().toString())
+                    val row = JSONObject().put("user_id", session.getJSONObject("user").getString("id")).put("profile_key", profile).put("profile_name", profile).put("encrypted_payload", encrypted.toString()).put("encryption_version", 1).put("updated_at", java.time.Instant.now().toString())
                     airRequest("POST", "/rest/v1/air_sync_profiles?on_conflict=user_id%2Cprofile_key", row, session.getString("access_token"), "resolution=merge-duplicates,return=minimal")
                     runOnUiThread { Toast.makeText(this, "AIR Sync backup complete for $profile.", Toast.LENGTH_LONG).show() }
                 } else {
                     val rows = airRequestArray("/rest/v1/air_sync_profiles?select=profile_name,encrypted_payload&profile_key=eq." + URLEncoder.encode(profile, "UTF-8") + "&limit=1", session.getString("access_token"))
                     if (rows.length() == 0) throw Exception("No cloud backup exists for this profile yet.")
-                    val packed = rows.getJSONObject(0).getJSONObject("encrypted_payload")
+                    val packed = JSONObject(rows.getJSONObject(0).optString("encrypted_payload"))
                     val data = JSONObject(decryptSyncPayload(packed, passphrase))
                     if (data.optString("profile") != profile) throw Exception("Backup belongs to another profile.")
                     runOnUiThread { AlertDialog.Builder(this).setTitle("Restore AIR Sync?").setMessage("This replaces bookmarks, history, settings and open tabs for $profile.")
