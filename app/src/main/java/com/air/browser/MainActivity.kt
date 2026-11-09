@@ -4,6 +4,13 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.app.DownloadManager
 import android.content.Context
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
+import android.os.Build
+import android.provider.Settings
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
+import java.io.File
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
@@ -67,6 +74,18 @@ class MainActivity : Activity() {
     }
 
     private var activeProfile = "Personal"
+    private var updateReceiverRegistered = false
+    private var installerLaunched = false
+    private val updatePrefs by lazy { getSharedPreferences("air_browser_updates", Context.MODE_PRIVATE) }
+    private val updateDownloadReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action != DownloadManager.ACTION_DOWNLOAD_COMPLETE) return
+            val completedId = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L)
+            if (completedId == updatePrefs.getLong("pending_download_id", -1L)) {
+                handleUpdateDownload(completedId)
+            }
+        }
+    }
     private val prefs: android.content.SharedPreferences get() = getSharedPreferences(PREFS + "_" + activeProfile, Context.MODE_PRIVATE)
     private val basePrefs by lazy { getSharedPreferences(PREFS + "_profiles", Context.MODE_PRIVATE) }
     private val tabs = mutableListOf<BrowserTab>()
@@ -96,6 +115,8 @@ class MainActivity : Activity() {
         buildInterface()
         applyBrowserTheme()
         restoreTabs()
+        registerUpdateDownloadReceiver()
+        checkPendingUpdateDownload()
         if (prefs.getBoolean("automatic_updates", true)) Handler(Looper.getMainLooper()).postDelayed({ checkForUpdates(false) }, 4500)
     }
 
@@ -937,12 +958,20 @@ class MainActivity : Activity() {
 
     private fun checkForUpdates(manual: Boolean) {
         if (!manual && !prefs.getBoolean("automatic_updates", true)) return
+        if (updatePrefs.getLong("pending_download_id", -1L) != -1L) {
+            if (manual) Toast.makeText(this, "An AIR Browser update is already downloading.", Toast.LENGTH_LONG).show()
+            checkPendingUpdateDownload()
+            return
+        }
         Thread {
             var latestBuild = 0
             var downloadUrl = ""
             try {
                 val connection = (URL("https://api.github.com/repos/betabeeswax/air-browser-android/releases?per_page=10").openConnection() as HttpURLConnection).apply {
-                    connectTimeout = 10000; readTimeout = 10000; setRequestProperty("User-Agent", "AIR-Browser-Android")
+                    connectTimeout = 10000
+                    readTimeout = 10000
+                    setRequestProperty("User-Agent", "AIR-Browser-Android")
+                    setRequestProperty("Accept", "application/vnd.github+json")
                 }
                 val releases = JSONArray(connection.inputStream.bufferedReader().use { it.readText() })
                 connection.disconnect()
@@ -953,22 +982,120 @@ class MainActivity : Activity() {
                     val build = Regex("(\\d+)$").find(tag)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
                     val assets = release.optJSONArray("assets") ?: JSONArray()
                     var apk = ""
-                    for (j in 0 until assets.length()) { val asset = assets.optJSONObject(j) ?: continue; if (asset.optString("name") == "AIR-Browser-Android.apk") apk = asset.optString("browser_download_url") }
-                    if (build > latestBuild && apk.isNotBlank()) { latestBuild = build; downloadUrl = apk }
+                    for (j in 0 until assets.length()) {
+                        val asset = assets.optJSONObject(j) ?: continue
+                        if (asset.optString("name") == "AIR-Browser-Android.apk") apk = asset.optString("browser_download_url")
+                    }
+                    if (build > latestBuild && apk.startsWith("https://")) {
+                        latestBuild = build
+                        downloadUrl = apk
+                    }
                 }
             } catch (_: Exception) { }
             runOnUiThread {
                 val currentBuild = packageManager.getPackageInfo(packageName, 0).versionCode
                 if (latestBuild > currentBuild && downloadUrl.isNotBlank()) {
                     AlertDialog.Builder(this).setTitle("AIR Browser update available")
-                        .setMessage("AIR Browser Android build $latestBuild is available. Would you like to update now or later?")
-                        .setPositiveButton("Update now") { _, _ -> startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(downloadUrl))) }
+                        .setMessage("AIR Browser Android build $latestBuild is ready. AIR will download it for you in the background. You only need to approve the installation.")
+                        .setPositiveButton("Download update") { _, _ -> downloadUpdate(downloadUrl) }
                         .setNegativeButton("Later", null).show()
                 } else if (manual) {
                     Toast.makeText(this, if (latestBuild == 0) "Couldn't check for updates." else "AIR Browser is up to date.", Toast.LENGTH_LONG).show()
                 }
             }
         }.start()
+    }
+
+    private fun registerUpdateDownloadReceiver() {
+        if (updateReceiverRegistered) return
+        ContextCompat.registerReceiver(
+            this,
+            updateDownloadReceiver,
+            IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+        updateReceiverRegistered = true
+    }
+
+    private fun downloadUpdate(downloadUrl: String) {
+        try {
+            val target = File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "AIR-Browser-Update.apk")
+            if (target.exists()) target.delete()
+            val request = DownloadManager.Request(Uri.parse(downloadUrl))
+                .setTitle("AIR Browser update")
+                .setDescription("Downloading the latest AIR Browser update")
+                .setMimeType("application/vnd.android.package-archive")
+                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                .setDestinationInExternalFilesDir(this, Environment.DIRECTORY_DOWNLOADS, "AIR-Browser-Update.apk")
+            val manager = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
+            val id = manager.enqueue(request)
+            updatePrefs.edit().putLong("pending_download_id", id).apply()
+            installerLaunched = false
+            Toast.makeText(this, "Downloading AIR Browser update in the background…", Toast.LENGTH_LONG).show()
+        } catch (_: Exception) {
+            Toast.makeText(this, "Couldn't start the update download. Please try again.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun checkPendingUpdateDownload() {
+        val id = updatePrefs.getLong("pending_download_id", -1L)
+        if (id == -1L) return
+        val manager = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
+        val cursor = manager.query(DownloadManager.Query().setFilterById(id)) ?: return
+        cursor.use {
+            if (!it.moveToFirst()) {
+                updatePrefs.edit().remove("pending_download_id").apply()
+                return
+            }
+            when (it.getInt(it.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))) {
+                DownloadManager.STATUS_SUCCESSFUL -> handleUpdateDownload(id)
+                DownloadManager.STATUS_FAILED -> {
+                    updatePrefs.edit().remove("pending_download_id").apply()
+                    Toast.makeText(this, "The AIR Browser update couldn't download. Please try again.", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    private fun handleUpdateDownload(id: Long) {
+        val manager = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
+        val cursor = manager.query(DownloadManager.Query().setFilterById(id)) ?: return
+        var successful = false
+        cursor.use {
+            if (it.moveToFirst()) successful = it.getInt(it.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)) == DownloadManager.STATUS_SUCCESSFUL
+        }
+        if (!successful) return
+        val apk = File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "AIR-Browser-Update.apk")
+        if (!apk.exists() || apk.length() == 0L) {
+            Toast.makeText(this, "The update file is missing. Please download it again.", Toast.LENGTH_LONG).show()
+            updatePrefs.edit().remove("pending_download_id").apply()
+            return
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
+            Toast.makeText(this, "Allow AIR Browser to install updates. The downloaded update is saved.", Toast.LENGTH_LONG).show()
+            try {
+                startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+            } catch (_: Exception) { }
+            return
+        }
+        if (installerLaunched) return
+        try {
+            val apkUri = FileProvider.getUriForFile(this, "$packageName.fileprovider", apk)
+            val installIntent = Intent(Intent.ACTION_INSTALL_PACKAGE).apply {
+                setDataAndType(apkUri, "application/vnd.android.package-archive")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            installerLaunched = true
+            startActivity(installIntent)
+        } catch (_: Exception) {
+            installerLaunched = false
+            Toast.makeText(this, "Android couldn't open the installer. Try opening the update again from AIR Browser.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun clearPendingUpdate() {
+        updatePrefs.edit().remove("pending_download_id").apply()
+        installerLaunched = false
     }
 
     private fun searchUrl(query: String): String {
@@ -1218,6 +1345,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         tabs.forEach { it.webView.onResume() }
+        Handler(Looper.getMainLooper()).postDelayed({ checkPendingUpdateDownload() }, 500)
     }
 
     @Suppress("DEPRECATION")
@@ -1233,6 +1361,10 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        if (updateReceiverRegistered) {
+            try { unregisterReceiver(updateDownloadReceiver) } catch (_: Exception) { }
+            updateReceiverRegistered = false
+        }
         tabs.forEach {
             it.webView.stopLoading()
             it.webView.destroy()
