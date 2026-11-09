@@ -76,6 +76,7 @@ class MainActivity : Activity() {
     private lateinit var backButton: TextView
     private lateinit var forwardButton: TextView
     private lateinit var reloadButton: TextView
+    private lateinit var bookmarkButton: TextView
     private lateinit var profileButton: TextView
     private lateinit var inAppPanel: LinearLayout
 
@@ -200,7 +201,8 @@ class MainActivity : Activity() {
         addressRow.addView(addressBar, LinearLayout.LayoutParams(0, dp(42), 1f).apply {
             setMargins(dp(3), 0, dp(3), 0)
         })
-        addressRow.addView(actionText("☆") { addBookmark() }, buttonParams())
+        bookmarkButton = actionText("☆") { addBookmark() }.apply { contentDescription = "Add bookmark" }
+        addressRow.addView(bookmarkButton, buttonParams())
         addressRow.addView(actionText("▤") { toggleReadingMode() }.apply { contentDescription = "Reading mode" }, buttonParams())
         addressRow.addView(actionText("Go") { navigateFromAddress() }, buttonParams())
         root.addView(addressRow, LinearLayout.LayoutParams(-1, dp(52)))
@@ -222,6 +224,7 @@ class MainActivity : Activity() {
 
         setContentView(root)
         updateNavigationButtons()
+        updateBookmarkButton()
     }
 
     private fun restoreTabs() {
@@ -281,6 +284,7 @@ class MainActivity : Activity() {
                 if (activeTabId == tab.id) {
                     addressBar.setText(if (isHome(url)) "" else url)
                     updateNavigationButtons()
+                    updateBookmarkButton()
                 }
             }
 
@@ -290,6 +294,7 @@ class MainActivity : Activity() {
                 if (activeTabId == tab.id) {
                     addressBar.setText(if (isHome(url)) "" else url)
                     updateNavigationButtons()
+                    updateBookmarkButton()
                 }
                 if (!isHome(url)) addHistory(tab.title, url)
                 saveTabs()
@@ -584,7 +589,7 @@ class MainActivity : Activity() {
             try {
                 val endpoint = if (signup) "/auth/v1/signup" else "/auth/v1/token?grant_type=password"
                 val result = airRequest("POST", endpoint, JSONObject().put("email", email).put("password", password), null)
-                if (result.has("access_token")) { prefs.edit().putString("air_auth_session", result.toString()).apply(); runOnUiThread { showAirAccountScreen(); Toast.makeText(this, "Signed in to AIR Account.", Toast.LENGTH_SHORT).show() } }
+                if (result.has("access_token") && result.has("user")) { prefs.edit().putString("air_auth_session", result.toString()).apply(); runOnUiThread { showAirAccountScreen(); Toast.makeText(this, "Signed in to AIR Account.", Toast.LENGTH_SHORT).show() } }
                 else if (signup) runOnUiThread { Toast.makeText(this, "Account created. Check your email if confirmation is required, then sign in.", Toast.LENGTH_LONG).show() }
                 else throw Exception("No session was returned.")
             } catch (e: Exception) { runOnUiThread { Toast.makeText(this, "AIR Account: " + (e.message ?: "Sign-in failed"), Toast.LENGTH_LONG).show() } }
@@ -717,11 +722,17 @@ class MainActivity : Activity() {
     }
     private fun airRequest(method: String, endpoint: String, body: JSONObject?, token: String?, prefer: String? = null): JSONObject {
         val c=(URL(AIR_SUPABASE_URL+endpoint).openConnection() as HttpURLConnection)
-        c.requestMethod=method; c.connectTimeout=20000; c.readTimeout=20000; c.setRequestProperty("apikey",AIR_SUPABASE_KEY); c.setRequestProperty("Content-Type","application/json")
+        c.requestMethod=method; c.connectTimeout=20000; c.readTimeout=20000; c.setRequestProperty("apikey",AIR_SUPABASE_KEY); c.setRequestProperty("Content-Type","application/json"); c.setRequestProperty("Accept","application/json")
         if(token!=null)c.setRequestProperty("Authorization","Bearer $token"); if(prefer!=null)c.setRequestProperty("Prefer",prefer)
         if(body!=null){c.doOutput=true;c.outputStream.use{it.write(body.toString().toByteArray(StandardCharsets.UTF_8))}}
         val status=c.responseCode; val stream=if(status in 200..299)c.inputStream else c.errorStream; val raw=stream?.bufferedReader()?.use{it.readText()} ?: ""
-        if(status !in 200..299)throw Exception("Server $status: "+raw.take(180))
+        if(status !in 200..299) {
+            val detail = try {
+                val error = JSONObject(raw)
+                error.optString("msg").ifBlank { error.optString("message") }.ifBlank { error.optString("error_description") }.ifBlank { error.optString("error") }
+            } catch (_: Exception) { raw }
+            throw Exception("Server $status: " + detail.ifBlank { "Request failed. Check your connection and try again." }.take(220))
+        }
         return if(raw.isBlank()) JSONObject() else JSONObject(raw)
     }
     private fun airRequestArray(endpoint: String, token: String): JSONArray {
@@ -949,6 +960,25 @@ class MainActivity : Activity() {
             }.setNegativeButton("Close", null).show()
     }
 
+    private fun isBookmarked(url: String): Boolean {
+        if (url.isBlank() || isHome(url)) return false
+        val normalized = url.trimEnd('/')
+        val items = readArray("bookmarks")
+        return (0 until items.length()).any { index ->
+            val item = items.optJSONObject(index)
+            (item?.optString("url") ?: items.optString(index)).trimEnd('/') == normalized
+        }
+    }
+
+    private fun updateBookmarkButton() {
+        if (!::bookmarkButton.isInitialized) return
+        val tab = activeTab()
+        val saved = tab?.let { isBookmarked(it.url) } == true
+        bookmarkButton.text = if (saved) "★" else "☆"
+        bookmarkButton.setTextColor(if (saved) Color.rgb(255, 196, 61) else Color.WHITE)
+        bookmarkButton.contentDescription = if (saved) "Remove bookmark" else "Add bookmark"
+    }
+
     private fun addBookmark() {
         val tab = activeTab() ?: return
         if (isHome(tab.url)) {
@@ -956,14 +986,20 @@ class MainActivity : Activity() {
             return
         }
         val items = readArray("bookmarks")
-        val duplicate = (0 until items.length()).any { items.optJSONObject(it)?.optString("url") == tab.url }
-        if (duplicate) {
-            Toast.makeText(this, "Already bookmarked.", Toast.LENGTH_SHORT).show()
-            return
+        val existing = (0 until items.length()).firstOrNull { index ->
+            val item = items.optJSONObject(index)
+            (item?.optString("url") ?: items.optString(index)).trimEnd('/') == tab.url.trimEnd('/')
         }
-        items.put(JSONObject().put("title", tab.title).put("url", tab.url))
-        prefs.edit().putString("bookmarks", items.toString()).apply()
-        Toast.makeText(this, "Bookmark saved.", Toast.LENGTH_SHORT).show()
+        if (existing != null) {
+            items.remove(existing)
+            prefs.edit().putString("bookmarks", items.toString()).apply()
+            Toast.makeText(this, "Bookmark removed.", Toast.LENGTH_SHORT).show()
+        } else {
+            items.put(JSONObject().put("title", tab.title).put("url", tab.url))
+            prefs.edit().putString("bookmarks", items.toString()).apply()
+            Toast.makeText(this, "Bookmark saved.", Toast.LENGTH_SHORT).show()
+        }
+        updateBookmarkButton()
     }
 
     private fun showBookmarks() = showSavedList("Bookmarks", "bookmarks", false)
