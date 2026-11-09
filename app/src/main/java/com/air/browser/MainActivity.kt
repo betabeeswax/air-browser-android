@@ -76,6 +76,7 @@ class MainActivity : Activity() {
         window.decorView.systemUiVisibility = 0
         CookieManager.getInstance().setAcceptCookie(true)
         buildInterface()
+        applyBrowserTheme()
         restoreTabs()
         if (prefs.getBoolean("automatic_updates", true)) Handler(Looper.getMainLooper()).postDelayed({ checkForUpdates(false) }, 4500)
     }
@@ -398,9 +399,48 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun applyBrowserTheme() {
+        val theme = prefs.getString("theme", "dark") ?: "dark"
+        val palette = when (theme) {
+            "midnight" -> intArrayOf(Color.rgb(9, 13, 29), Color.rgb(17, 26, 49), Color.rgb(75, 86, 200))
+            "ocean" -> intArrayOf(Color.rgb(9, 43, 59), Color.rgb(16, 65, 87), Color.rgb(8, 127, 158))
+            "purple" -> intArrayOf(Color.rgb(37, 22, 56), Color.rgb(53, 32, 71), Color.rgb(134, 80, 199))
+            "forest" -> intArrayOf(Color.rgb(18, 43, 34), Color.rgb(29, 59, 46), Color.rgb(38, 115, 75))
+            "sunset" -> intArrayOf(Color.rgb(58, 33, 30), Color.rgb(81, 45, 41), Color.rgb(198, 93, 54))
+            "rose" -> intArrayOf(Color.rgb(56, 32, 45), Color.rgb(75, 42, 61), Color.rgb(182, 79, 131))
+            "light" -> intArrayOf(Color.rgb(220, 232, 246), Color.rgb(247, 250, 255), Color.rgb(23, 104, 214))
+            else -> intArrayOf(Color.rgb(11, 16, 32), Color.rgb(28, 39, 61), Color.rgb(39, 137, 232))
+        }
+        val light = theme == "light"
+        val foreground = if (light) Color.rgb(20, 36, 58) else Color.WHITE
+        window.statusBarColor = palette[0]
+        window.navigationBarColor = palette[0]
+        root.setBackgroundColor(palette[0])
+        if (::addressBar.isInitialized) {
+            addressBar.setTextColor(foreground)
+            addressBar.setHintTextColor(if (light) Color.rgb(83, 108, 138) else Color.rgb(160, 173, 195))
+            addressBar.background = rounded(palette[1], dp(16))
+        }
+        if (::inAppPanel.isInitialized) inAppPanel.setBackgroundColor(palette[0])
+        if (::profileButton.isInitialized) {
+            profileButton.setTextColor(if (light) Color.rgb(30, 82, 135) else Color.rgb(151, 204, 255))
+            profileButton.background = rounded(palette[1], dp(12))
+        }
+    }
+
     private fun showSettingsScreen() {
         showInAppPanel("Settings") {
             addView(panelLabel("GENERAL"))
+            addView(panelButton("Colour theme: " + (prefs.getString("theme", "dark") ?: "dark").replaceFirstChar { it.uppercase() }) {
+                val themes = arrayOf("Dark", "Midnight", "Ocean", "Purple", "Forest", "Sunset", "Rose", "Light")
+                AlertDialog.Builder(this@MainActivity).setTitle("Colour theme")
+                    .setSingleChoiceItems(themes, themes.indexOf((prefs.getString("theme", "dark") ?: "dark").replaceFirstChar { it.uppercase() }).coerceAtLeast(0)) { dialog, which ->
+                        prefs.edit().putString("theme", themes[which].lowercase()).apply()
+                        dialog.dismiss()
+                        applyBrowserTheme()
+                        showSettingsScreen()
+                    }.setNegativeButton("Cancel", null).show()
+            }, LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(8) })
             addView(panelButton("Default search engine: " + (prefs.getString("search_engine", "Google") ?: "Google")) {
                 val engines = arrayOf("Google", "Bing", "DuckDuckGo")
                 AlertDialog.Builder(this@MainActivity).setTitle("Default search engine")
