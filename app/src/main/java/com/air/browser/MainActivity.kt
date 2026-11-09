@@ -609,7 +609,8 @@ class MainActivity : Activity() {
                     airRequest("POST", "/rest/v1/air_sync_profiles?on_conflict=user_id%2Cprofile_key", row, session.getString("access_token"), "resolution=merge-duplicates,return=minimal")
                     runOnUiThread { Toast.makeText(this, "AIR Sync backup complete for $profile.", Toast.LENGTH_LONG).show() }
                 } else {
-                    val rows = airRequestArray("/rest/v1/air_sync_profiles?select=profile_name,encrypted_payload&profile_key=eq." + URLEncoder.encode(profile, "UTF-8") + "&limit=1", session.getString("access_token"))
+                    val userId = session.getJSONObject("user").getString("id")
+                    val rows = airRequestArray("/rest/v1/air_sync_profiles?select=profile_name,encrypted_payload&user_id=eq." + URLEncoder.encode(userId, "UTF-8") + "&profile_key=eq." + URLEncoder.encode(profile, "UTF-8") + "&limit=1", session.getString("access_token"))
                     if (rows.length() == 0) throw Exception("No cloud backup exists for this profile yet.")
                     val packed = JSONObject(rows.getJSONObject(0).optString("encrypted_payload"))
                     val data = JSONObject(decryptSyncPayload(packed, passphrase))
@@ -624,16 +625,35 @@ class MainActivity : Activity() {
         }.start()
     }
     private fun buildSyncPayload(profile: String): JSONObject {
-        val bookmarks = JSONArray(); val savedBookmarks = readArray("bookmarks")
-        for (i in 0 until savedBookmarks.length()) bookmarks.put(savedBookmarks.optJSONObject(i)?.optString("url") ?: savedBookmarks.optString(i))
-        val history = JSONArray(); val savedHistory = readArray("history")
-        for (i in 0 until savedHistory.length()) history.put(savedHistory.optJSONObject(i)?.optString("url") ?: savedHistory.optString(i))
+        val bookmarks = JSONArray()
+        val savedBookmarks = readArray("bookmarks")
+        for (i in 0 until savedBookmarks.length()) {
+            val item = savedBookmarks.optJSONObject(i)
+            val url = item?.optString("url") ?: savedBookmarks.optString(i)
+            if (url.startsWith("https://") || url.startsWith("http://")) bookmarks.put(url)
+        }
+        val history = JSONArray()
+        val savedHistory = readArray("history")
+        for (i in 0 until savedHistory.length()) {
+            val item = savedHistory.optJSONObject(i)
+            val url = item?.optString("url") ?: savedHistory.optString(i)
+            if (url.startsWith("https://") || url.startsWith("http://")) history.put(url)
+        }
+        // Use the desktop AIR Sync setting names so either app can restore the other.
         val settings = JSONObject()
-        prefs.all.forEach { (k, v) -> if (k in setOf("theme","search_engine","restore_tabs","automatic_updates","javascript","load_images","desktop_site","page_zoom","homepage")) when(v) {
-            is Boolean -> settings.put(k,v); is Int -> settings.put(k,v); is String -> settings.put(k,v)
-        } }
-        val openTabs = JSONArray(); tabs.filter { it.url.startsWith("http://") || it.url.startsWith("https://") }.forEach { openTabs.put(it.url) }
-        return JSONObject().put("profile",profile).put("bookmarks",bookmarks).put("history",history).put("settings",settings).put("startBackground","").put("openTabs",openTabs)
+            .put("theme", prefs.getString("theme", "dark"))
+            .put("defaultEngine", prefs.getString("search_engine", "Google"))
+            .put("automaticUpdates", prefs.getBoolean("automatic_updates", true))
+            .put("restoreTabs", prefs.getBoolean("restore_tabs", true))
+            .put("startup", if (prefs.getBoolean("restore_tabs", true)) "continue" else "newPage")
+            .put("javascript", prefs.getBoolean("javascript", true))
+            .put("loadImages", prefs.getBoolean("load_images", true))
+            .put("desktopSite", prefs.getBoolean("desktop_site", false))
+            .put("pageZoom", prefs.getInt("page_zoom", 100))
+        val openTabs = JSONArray()
+        tabs.filter { it.url.startsWith("http://") || it.url.startsWith("https://") }.forEach { openTabs.put(it.url) }
+        return JSONObject().put("profile", profile).put("bookmarks", bookmarks).put("history", history)
+            .put("settings", settings).put("startBackground", "").put("openTabs", openTabs)
     }
     private fun applySyncPayload(data: JSONObject) {
         fun toEntries(key: String): JSONArray {
@@ -645,23 +665,37 @@ class MainActivity : Activity() {
         val settings = data.optJSONObject("settings")
         if (settings != null) {
             val e = prefs.edit()
-            settings.keys().forEach { k ->
-                when (val v = settings.opt(k)) {
-                    is Boolean -> e.putBoolean(k, v)
-                    is Int -> e.putInt(k, v)
-                    is String -> e.putString(k, v)
-                }
-            }
+            if (settings.has("theme")) e.putString("theme", settings.optString("theme"))
             if (settings.has("defaultEngine")) e.putString("search_engine", settings.optString("defaultEngine"))
+            else if (settings.has("search_engine")) e.putString("search_engine", settings.optString("search_engine"))
             if (settings.has("automaticUpdates")) e.putBoolean("automatic_updates", settings.optBoolean("automaticUpdates"))
+            else if (settings.has("automatic_updates")) e.putBoolean("automatic_updates", settings.optBoolean("automatic_updates"))
             if (settings.has("restoreTabs")) e.putBoolean("restore_tabs", settings.optBoolean("restoreTabs"))
-            if (settings.has("startup")) e.putBoolean("restore_tabs", settings.optString("startup") == "continue")
+            else if (settings.has("restore_tabs")) e.putBoolean("restore_tabs", settings.optBoolean("restore_tabs"))
+            if (settings.has("startup")) e.putBoolean("restore_tabs", settings.optString("startup") == "continue" || settings.optString("startup") == "continueWhereYouLeftOff")
+            if (settings.has("javascript")) e.putBoolean("javascript", settings.optBoolean("javascript"))
+            if (settings.has("loadImages")) e.putBoolean("load_images", settings.optBoolean("loadImages"))
+            else if (settings.has("load_images")) e.putBoolean("load_images", settings.optBoolean("load_images"))
+            if (settings.has("desktopSite")) e.putBoolean("desktop_site", settings.optBoolean("desktopSite"))
+            else if (settings.has("desktop_site")) e.putBoolean("desktop_site", settings.optBoolean("desktop_site"))
+            if (settings.has("pageZoom")) e.putInt("page_zoom", settings.optInt("pageZoom", 100))
+            else if (settings.has("page_zoom")) e.putInt("page_zoom", settings.optInt("page_zoom", 100))
             e.apply()
             applyBrowserTheme()
         }
         val urls = data.optJSONArray("openTabs") ?: JSONArray()
-        tabs.toList().forEach { closeTab(it.id) }
-        if (urls.length()==0) addTab(HOME_BASE) else for (i in 0 until minOf(urls.length(),MAX_RESTORED_TABS)) addTab(urls.optString(i),switchTo=i==minOf(urls.length(),MAX_RESTORED_TABS)-1)
+        // Destroy the old tabs directly. closeTab() creates a replacement tab when the last tab closes.
+        tabs.toList().forEach { tab ->
+            webContainer.removeView(tab.webView)
+            tab.webView.stopLoading()
+            tab.webView.destroy()
+        }
+        tabs.clear()
+        activeTabId = -1
+        val validUrls = (0 until urls.length()).map { urls.optString(it) }
+            .filter { it.startsWith("https://") || it.startsWith("http://") }.take(MAX_RESTORED_TABS)
+        if (validUrls.isEmpty()) addTab(HOME_BASE)
+        else validUrls.forEachIndexed { index, url -> addTab(url, switchTo = index == validUrls.lastIndex) }
     }
     private fun encryptSyncPayload(plain: String, passphrase: String): JSONObject {
         val salt=ByteArray(16).also { SecureRandom().nextBytes(it) }; val iv=ByteArray(12).also { SecureRandom().nextBytes(it) }
