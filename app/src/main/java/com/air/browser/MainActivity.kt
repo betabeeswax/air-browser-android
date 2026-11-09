@@ -151,7 +151,7 @@ class MainActivity : Activity() {
             clipToPadding = false
         }
         tabStrip = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        tabScroll.addView(tabStrip, android.widget.HorizontalScrollView.LayoutParams(-2, dp(40)))
+        tabScroll.addView(tabStrip, LinearLayout.LayoutParams(-2, dp(40)))
         root.addView(tabScroll, LinearLayout.LayoutParams(-1, dp(42)))
 
         val addressRow = LinearLayout(this).apply {
